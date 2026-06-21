@@ -1,0 +1,15 @@
+network: 10.7.0.0
+server: 10.7.0.1
+
+[HELLO]
+[@CHALLENGE (random bits to guess encrypted with join_token)]
+[#ACCEPT_CHALLENGE (answer to the challange)]
+[#@CHALLENGE_ACK]
+
+[#JOIN_REQUEST (name, public wg key)]
+[#@JOIN_ACCEPT (ip:10.7.0.2/32)]
+
+@ : from server
+# : encrypted
+
+ping 10.7.0.1
