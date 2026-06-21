@@ -7,17 +7,20 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+type NetworkLayerConfig struct {
+	IP   string `yaml:"ip"`
+	CIDR byte   `yaml:"cidr"`
+}
+
 type NodeConfig struct {
-	Name      string `yaml:"name"`
-	Bootstrap bool   `yaml:"bootstrap"`
+	Name         string             `yaml:"name"`
+	Bootstrap    bool               `yaml:"bootstrap"`
+	NetworkLayer NetworkLayerConfig `yaml:"network"`
 }
 
 type NetworkConfig struct {
 	WireguardPort int `yaml:"wireguard_port"`
-}
-
-type JoinConfig struct {
-	Endpoint string `yaml:"endpoint"`
+	TCPJoinPort   int `yaml:"tcp_join_port"`
 }
 
 type ConsensusConfig struct {
@@ -37,7 +40,6 @@ type ApiConfig struct {
 type Config struct {
 	Node      NodeConfig      `yaml:"node"`
 	Network   NetworkConfig   `yaml:"network_config"`
-	Join      JoinConfig      `yaml:"join_config"`
 	Consensus ConsensusConfig `yaml:"consensus"`
 	Security  SecurityConfig  `yaml:"security_config"`
 	Api       ApiConfig       `yaml:"api_config"`

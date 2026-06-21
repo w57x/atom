@@ -11,13 +11,13 @@ import (
 type Node struct {
 	PubKey   string
 	Endpoint string
+	RaftPort int
 }
 
 type Token struct {
-	ID        string
-	Secret    string
-	ExpiresAt int64
-	UsesLeft  int
+	ID       string
+	Secret   string
+	UsesLeft int
 }
 
 type MeshState struct {

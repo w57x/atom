@@ -1,23 +1,23 @@
 node:
-  name: "local_pc"
+  name: "node-1"
   bootstrap: true
   network:
-     - ip: "10.7.0.0"
-     - cidr: 16
+    ip: "10.7.0.0"
+    cidr: 16
 
 network_config:
   wireguard_port: 51820
+  tcp_join_port: 7700
 
-join_config:
-  endpoint: "82.123.45.67:8080"
+# join_config:
+#   endpoint: "82.123.45.67:8080"
 
 consensus:
   data_dir: "/tmp/raft-data"
   raft_port: 7000
 
 security_config:
-  join_token: "super-secret-token-123"
   private_key_path: "./wg_private.key"
 
 api_config:
-  socket_path: "/var/run/mesh.sock"
+  socket_path: "/var/run/atom.sock"
