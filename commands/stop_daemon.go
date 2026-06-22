@@ -19,7 +19,10 @@ func StopDaemonCommand(socketPath string) {
 
 	err = client.Call("Atom.StopDaemon", args, &reply)
 	if err != nil {
-		// It's possible the connection drops immediately if the daemon shuts down very quickly
+		if err.Error() == "unexpected EOF" || err.Error() == "connection is shut down" {
+			fmt.Println("Daemon stop signal sent successfully (daemon terminated).")
+			return
+		}
 		log.Fatalf("RPC communication failed (daemon may have stopped already): %v", err)
 	}
 

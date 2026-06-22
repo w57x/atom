@@ -200,9 +200,9 @@ func Start(cfg config.Config) error {
 	}()
 
 	localAPI := &LocalAPI{
-		raftNode:  d.raftNode,
-		meshFSM:   meshFSM,
-		localName: cfg.Node.Name,
+		raftNode: d.raftNode,
+		meshFSM:  meshFSM,
+		config:   cfg,
 	}
 
 	if cfg.Node.Bootstrap {

@@ -19,6 +19,10 @@ func RemoveNodeCommand(socketPath string, nodeName string) {
 
 	err = client.Call("Atom.RemoveNode", args, &reply)
 	if err != nil {
+		if err.Error() == "unexpected EOF" || err.Error() == "connection is shut down" {
+			fmt.Printf("Node %s removed successfully (daemon terminated).\n", nodeName)
+			return
+		}
 		log.Fatalf("RPC communication failed: %v", err)
 	}
 

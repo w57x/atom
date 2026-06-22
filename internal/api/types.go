@@ -25,6 +25,14 @@ type DaemonStopReply struct {
 	Error string
 }
 
+type NodeDestroyArgs struct {
+	NodeName string
+}
+
+type NodeDestroyReply struct {
+	Error string
+}
+
 type NodeRemoveArgs struct {
 	NodeName string
 }

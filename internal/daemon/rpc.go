@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"atom/config"
 	"atom/internal/api"
 	"atom/internal/fsm"
 	"atom/internal/network"
@@ -17,9 +18,9 @@ import (
 )
 
 type LocalAPI struct {
-	raftNode  *raft.Raft
-	meshFSM   *fsm.MeshFSM
-	localName string
+	raftNode *raft.Raft
+	meshFSM  *fsm.MeshFSM
+	config   config.Config
 }
 
 func (api *LocalAPI) forwardToLeader(method string, args any, reply any) error {
@@ -107,19 +108,69 @@ func (api *LocalAPI) StopDaemon(args *api.DaemonStopArgs, reply *api.DaemonStopR
 	return nil
 }
 
-func (api *LocalAPI) RemoveNode(args *api.NodeRemoveArgs, reply *api.NodeRemoveReply) error {
-	if api.raftNode.State() != raft.Leader {
-		return api.forwardToLeader("Atom.RemoveNode", args, reply)
+func (api *LocalAPI) DestroyNode(args *api.NodeDestroyArgs, reply *api.NodeDestroyReply) error {
+	slog.Info("Received API request to destroy this node. Shutting down gracefully...")
+	if api.config.Node.Name != args.NodeName {
+		slog.Warn("Bogus command call (destroy)")
+		return nil
+	}
+
+	p, err := os.FindProcess(os.Getpid())
+	if err == nil {
+		os.RemoveAll(api.config.Consensus.DataDir)
+		os.RemoveAll(api.config.Security.PrivateKeyPath)
+		p.Signal(os.Interrupt)
+	}
+
+	return nil
+}
+
+func (l *LocalAPI) RemoveNode(args *api.NodeRemoveArgs, reply *api.NodeRemoveReply) error {
+	if l.config.Node.Name == args.NodeName {
+		// NOTE: If the leader is asked to remove itself, it must step down and let another node handle it.
+		// Otherwise, it will destroy itself before it finishes replicating the FSM cleanup command
+		if len(l.meshFSM.State.Nodes) > 1 {
+			l.raftNode.LeadershipTransfer()
+			time.Sleep(1 * time.Second)
+			return l.forwardToLeader("Atom.RemoveNode", args, reply)
+		} else {
+			// It's just us left, destroy immediately
+			var stopReply api.NodeDestroyReply
+			return l.DestroyNode(&api.NodeDestroyArgs{NodeName: args.NodeName}, &stopReply)
+		}
+	}
+
+	if l.raftNode.State() != raft.Leader {
+		return l.forwardToLeader("Atom.RemoveNode", args, reply)
 	}
 
 	// Remove from Raft Configuration
-	future := api.raftNode.RemoveServer(raft.ServerID(args.NodeName), 0, 0)
+	future := l.raftNode.RemoveServer(raft.ServerID(args.NodeName), 0, 0)
 	if err := future.Error(); err != nil {
 		reply.Error = fmt.Sprintf("Failed to remove from raft: %v", err)
 		return nil
 	}
 
-	// Remove from Mesh State
+	// Fetch the node to get its VPN IP
+	node, exists := l.meshFSM.State.Nodes[args.NodeName]
+	if exists {
+		// Send a DaemonStop RPC to the target node over the VPN
+		// so it gracefully shuts down and doesn't get stuck in an election loop.
+		rpcAddr := fmt.Sprintf("%s:7001", node.VPNIP)
+		client, err := rpc.Dial("tcp", rpcAddr)
+		if err == nil {
+			var stopReply api.NodeDestroyReply
+			// We don't care if this returns an error
+			_ = client.Call("Atom.DestroyNode", &api.NodeDestroyArgs{NodeName: node.Name}, &stopReply)
+			client.Close()
+		}
+	}
+
+	// Give the Raft commit and the StopDaemon RPC a brief moment to fully propagate over the network
+	// before we apply the FSM command that completely destroys the WireGuard tunnel
+	time.Sleep(1 * time.Second)
+
+	// Remove from Mesh State (Cuts the Wireguard peer)
 	cmd := network.Command{
 		Opcode:  network.CmdRemoveNode,
 		Payload: args.NodeName,
@@ -131,7 +182,7 @@ func (api *LocalAPI) RemoveNode(args *api.NodeRemoveArgs, reply *api.NodeRemoveR
 		return err
 	}
 
-	applyFuture := api.raftNode.Apply(buf.Bytes(), 5*time.Second)
+	applyFuture := l.raftNode.Apply(buf.Bytes(), 5*time.Second)
 	if err := applyFuture.Error(); err != nil {
 		reply.Error = err.Error()
 	}
@@ -149,7 +200,7 @@ func (l *LocalAPI) ListNodes(args *api.NodeListArgs, reply *api.NodeListReply) e
 			PubKey:         node.PubKey,
 			PublicEndpoint: node.PublicEndpoint,
 			IsLeader:       node.Name == string(leaderID),
-			IsSelf:         node.Name == l.localName,
+			IsSelf:         node.Name == l.config.Node.Name,
 		})
 	}
 	return nil
