@@ -29,7 +29,9 @@ jobs:
           GOOS: linux
           GOARCH: amd64
         run: |
-          go build -v -ldflags="-X 'main.GitCommit=${{ github.sha }}' -X 'main.Version=${{ github.ref_name }}'" -o "build/atom-linux-amd64-${{ github.ref_name }}"
+          go build -v -ldflags="-X 'main.GitCommit=${{ github.sha }}' -X 'main.Version=${{ github.ref_name }}'" -o "build/atom"
+          tar -czvf "build/atom-linux-amd64-${{ github.ref_name }}.tar.gz" -C build atom
+          rm build/atom
 
       - name: Create GitHub Release
         env:
