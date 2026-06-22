@@ -114,7 +114,7 @@ func main() {
 				},
 			},
 			{
-				Name:  "tokens",
+				Name:  "token",
 				Usage: "Manage join tokens",
 				Commands: []*cli.Command{
 					{
