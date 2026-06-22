@@ -227,6 +227,16 @@ func Start(cfg config.Config) error {
 			if err := gob.NewEncoder(&buf).Encode(cmd); err == nil {
 				d.raftNode.Apply(buf.Bytes(), 5*time.Second)
 			}
+
+			// Broadcast the Network CIDR to the FSM so any future leader knows how to assign IPs
+			cidrCmd := network.Command{
+				Opcode:  network.CmdSetNetworkCIDR,
+				Payload: fmt.Sprintf("%s/%d", d.cfg.Node.NetworkLayer.IP, d.cfg.Node.NetworkLayer.CIDR),
+			}
+			var cidrBuf bytes.Buffer
+			if err := gob.NewEncoder(&cidrBuf).Encode(cidrCmd); err == nil {
+				d.raftNode.Apply(cidrBuf.Bytes(), 5*time.Second)
+			}
 		}()
 	}
 
@@ -422,7 +432,12 @@ func joinMeshCluster(cfg config.Config, pubKey string) (*network.JoinAcceptPaylo
 }
 
 func (d *Daemon) getNextValidIP() (netip.Addr, error) {
-	prefixStr := fmt.Sprintf("%s/%d", d.cfg.Node.NetworkLayer.IP, d.cfg.Node.NetworkLayer.CIDR)
+	var prefixStr string
+	if d.fsm.State.NetworkCIDR != "" {
+		prefixStr = d.fsm.State.NetworkCIDR
+	} else {
+		prefixStr = fmt.Sprintf("%s/%d", d.cfg.Node.NetworkLayer.IP, d.cfg.Node.NetworkLayer.CIDR)
+	}
 
 	prefix, err := netip.ParsePrefix(prefixStr)
 	if err != nil {

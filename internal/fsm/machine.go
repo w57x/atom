@@ -58,8 +58,9 @@ func (t *Token) String() string {
 }
 
 type MeshState struct {
-	Nodes  map[string]Node
-	Tokens map[string]Token
+	NetworkCIDR string
+	Nodes       map[string]Node
+	Tokens      map[string]Token
 }
 
 type MeshFSM struct {
@@ -179,6 +180,14 @@ func (f *MeshFSM) Apply(log *raft.Log) any {
 					slog.Error("Failed to remove wg peer", "err", err)
 				}
 			}
+		}
+
+	case network.CmdSetNetworkCIDR:
+		if cidr, ok := cmd.Payload.(string); ok {
+			f.State.NetworkCIDR = cidr
+			slog.Info("Network CIDR updated", "cidr", cidr)
+		} else {
+			slog.Error("Invalid payload type for CmdSetNetworkCIDR")
 		}
 	}
 
