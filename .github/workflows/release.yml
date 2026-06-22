@@ -1,0 +1,38 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build-and-release:
+    name: Build and Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: "go.mod"
+          cache: true
+
+      - name: Build Atom (Linux x86_64)
+        env:
+          GOOS: linux
+          GOARCH: amd64
+        run: |
+          go build -v -ldflags="-X 'main.GitCommit=${{ github.sha }}' -X 'main.Version=${{ github.ref_name }}'" -o "build/atom-linux-amd64-${{ github.ref_name }}"
+
+      - name: Create GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create ${{ github.ref_name }} build/* --title "${{ github.ref_name }}" --generate-notes

@@ -5,11 +5,20 @@ import (
 	"atom/config"
 	"atom/internal/daemon"
 	"context"
+	_ "embed"
 	"fmt"
 	"log"
 	"os"
 
 	"github.com/urfave/cli/v3"
+)
+
+//go:embed config.yaml
+var DefaultConfigTemplate string
+
+var (
+	Version   = "Unknown"
+	GitCommit = "Unknown"
 )
 
 func main() {
@@ -18,6 +27,34 @@ func main() {
 		Usage:                 "Decentralized mesh VPN node manager",
 		EnableShellCompletion: true,
 		Commands: []*cli.Command{
+			{
+				Name:  "version",
+				Usage: "Show the atom version",
+				Action: func(ctx context.Context, c *cli.Command) error {
+					fmt.Printf("atom (rev. %s tag %s)\n", GitCommit, Version)
+					return nil
+				},
+			},
+			{
+				Name:  "confgen",
+				Usage: "Generate a documented default config file",
+				Flags: []cli.Flag{
+					&cli.StringFlag{
+						Name:    "output",
+						Usage:   "Path to save the generated config file",
+						Aliases: []string{"o"},
+						Value:   "config.yaml",
+					},
+				},
+				Action: func(ctx context.Context, c *cli.Command) error {
+					outputPath := c.String("output")
+					if err := os.WriteFile(outputPath, []byte(DefaultConfigTemplate), 0644); err != nil {
+						return fmt.Errorf("failed to write config file: %w", err)
+					}
+					fmt.Printf("Successfully generated configuration file at %s\n", outputPath)
+					return nil
+				},
+			},
 			{
 				Name:  "daemon",
 				Usage: "Start the mesh node",
