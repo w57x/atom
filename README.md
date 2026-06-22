@@ -1,4 +1,4 @@
-# <img src="assets/atom-logo.svg" width="50" alt="Atom Logo" align="top"> Atom
+# <img src="assets/atom-logo.svg" width="100" alt="Atom Logo" align="left"> Atom
 
 **Atom** is a fully decentralized, self-healing, zero-trust mesh VPN. It marries
 the cryptographically secure, high-performance networking of **WireGuard** with
@@ -7,8 +7,6 @@ the distributed consensus of **HashiCorp Raft**.
 Unlike traditional hub-and-spoke VPNs or centrally coordinated overlays, Atom
 has **no single point of failure** and **no central coordination server**.
 The mesh completely orchestrates itself.
-
----
 
 ## Features
 
@@ -32,8 +30,6 @@ The mesh completely orchestrates itself.
   The Bootstrapper securely assigns IPs and propagates the new WireGuard
   public keys across the entire mesh in milliseconds.
 
----
-
 ## Architecture
 
 Atom abstracts away the complexity of managing WireGuard keys and OS-level routing.
@@ -44,8 +40,6 @@ Atom abstracts away the complexity of managing WireGuard keys and OS-level routi
    new node joins, the FSM adds the WireGuard peer to every machine. When a node
    is removed, the FSM instantly cuts the cryptographic tunnel on all nodes.
 3. **The CLI:** A lightweight client that talks to the local daemon via a Unix socket (`/tmp/atom.sock`).
-
----
 
 ## Getting Started
 
@@ -120,8 +114,6 @@ consensus:
 api:
   socket_path: "/tmp/atom.sock"
 ```
-
----
 
 ## Usage
 
