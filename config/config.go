@@ -37,9 +37,14 @@ type ApiConfig struct {
 	SocketPath string `yaml:"socket_path"`
 }
 
+type JoinConfig struct {
+	Endpoint string `yaml:"endpoint"`
+}
+
 type Config struct {
 	Node      NodeConfig      `yaml:"node"`
 	Network   NetworkConfig   `yaml:"network_config"`
+	Join      JoinConfig      `yaml:"join_config"`
 	Consensus ConsensusConfig `yaml:"consensus"`
 	Security  SecurityConfig  `yaml:"security_config"`
 	Api       ApiConfig       `yaml:"api_config"`

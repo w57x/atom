@@ -1,6 +1,19 @@
-Étape 1 : Le "Hello World" de HashiCorp Raft (En local)
-    Avant de toucher à WireGuard, vous devez réussir à faire discuter 3 instances de votre programme Go entre elles sur votre propre machine (via des ports différents, ex: 127.0.0.1:8001, :8002, :8003).
+# Atom - Future Polish and Enhancements
 
-    L'objectif : Initialiser un cluster Raft en mémoire, élire un leader, et envoyer une donnée simple (une bête chaîne de caractères "Test") pour voir si elle se réplique bien sur les deux autres nœuds.
+## System Integration
 
-    Pourquoi maintenant ? Cela vous permettra de comprendre comment configurer la bibliothèque github.com/hashicorp/raft (le transport réseau, le stockage des logs, etc.) sans complexité extérieure.
+- [ ] **Systemd Service Files**: Create a `.service` file configuration so the
+      Atom daemon can run continuously in the background on boot, properly
+      handle crashes, and manage logs through journalctl.
+
+## Networking Features
+
+- [ ] **Internal DNS (Mesh Naming)**: Integrate a lightweight DNS server
+      (e.g. CoreDNS) directly into the daemon. This will allow nodes to ping
+      and resolve each other by their configured hostnames (e.g. `ping node-2`)
+      instead of requiring the user to memorize the `10.7.0.x` VPN IPs.
+- [ ] **Advanced NAT Traversal (STUN/TURN)**: WireGuard's native NAT punching
+      works for most home routers, but fails on strict enterprise symmetric
+      firewalls. Implement a fallback mechanism using STUN/TURN relays
+      (similar to Tailscale's DERP servers) to guarantee 100% connectivity
+      between nodes in all network conditions.

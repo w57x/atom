@@ -27,23 +27,90 @@ func main() {
 						Usage:     "Path to the configuration YAML file",
 						Aliases:   []string{"c"},
 						TakesFile: true,
-						Required:  true,
 					},
 				},
 				Action: func(ctx context.Context, c *cli.Command) error {
 					configPath := c.String("config-path")
+					if configPath == "" {
+						return fmt.Errorf("required flag \"config-path\" not set")
+					}
 
 					cfg, err := config.LoadConfig(configPath)
 					if err != nil {
 						return fmt.Errorf("invalid config: %w", err)
 					}
 
-					fmt.Printf("%+v\n", cfg)
-
 					if err := daemon.Start(*cfg); err != nil {
 						return fmt.Errorf("daemon error: %w", err)
 					}
 					return nil
+				},
+				Commands: []*cli.Command{
+					{
+						Name:  "stop",
+						Usage: "Gracefully stop the running daemon",
+						Flags: []cli.Flag{
+							&cli.StringFlag{
+								Name:      "socket",
+								Usage:     "Path to the daemon unix socket",
+								Aliases:   []string{"s"},
+								TakesFile: true,
+								Value:     "/var/run/atom.sock",
+							},
+						},
+						Action: func(ctx context.Context, c *cli.Command) error {
+							commands.StopDaemonCommand(c.String("socket"))
+							return nil
+						},
+					},
+				},
+			},
+			{
+				Name:  "node",
+				Usage: "Manage mesh nodes",
+				Commands: []*cli.Command{
+					{
+						Name:  "list",
+						Usage: "List all nodes currently in the mesh",
+						Flags: []cli.Flag{
+							&cli.StringFlag{
+								Name:      "socket",
+								Usage:     "Path to the daemon unix socket",
+								Aliases:   []string{"s"},
+								TakesFile: true,
+								Value:     "/var/run/atom.sock",
+							},
+							&cli.BoolFlag{
+								Name:    "json",
+								Usage:   "Output as JSON",
+								Aliases: []string{"j"},
+							},
+						},
+						Action: func(ctx context.Context, c *cli.Command) error {
+							commands.ListNodesCommand(c.String("socket"), c.Bool("json"))
+							return nil
+						},
+					},
+					{
+						Name:  "remove",
+						Usage: "Remove a node from the mesh",
+						Flags: []cli.Flag{
+							&cli.StringFlag{
+								Name:      "socket",
+								Usage:     "Path to the daemon unix socket",
+								Aliases:   []string{"s"},
+								TakesFile: true,
+								Value:     "/var/run/atom.sock",
+							},
+						},
+						Action: func(ctx context.Context, c *cli.Command) error {
+							if c.Args().Len() < 1 {
+								return fmt.Errorf("node name is required")
+							}
+							commands.RemoveNodeCommand(c.String("socket"), c.Args().First())
+							return nil
+						},
+					},
 				},
 			},
 			{
@@ -67,12 +134,37 @@ func main() {
 								TakesFile: true,
 								Value:     "/var/run/atom.sock",
 							},
+							&cli.BoolFlag{
+								Name:    "json",
+								Usage:   "Output as JSON",
+								Aliases: []string{"j"},
+							},
 						},
 						Action: func(ctx context.Context, c *cli.Command) error {
 							uses := int(c.Int("uses"))
 							socket := c.String("socket")
 
-							commands.CreateTokenCommand(socket, uses)
+							commands.CreateTokenCommand(socket, uses, c.Bool("json"))
+							return nil
+						},
+					},
+					{
+						Name:  "revoke",
+						Usage: "Revoke an existing join token",
+						Flags: []cli.Flag{
+							&cli.StringFlag{
+								Name:      "socket",
+								Usage:     "Path to the daemon unix socket",
+								Aliases:   []string{"s"},
+								TakesFile: true,
+								Value:     "/var/run/atom.sock",
+							},
+						},
+						Action: func(ctx context.Context, c *cli.Command) error {
+							if c.Args().Len() < 1 {
+								return fmt.Errorf("token ID is required")
+							}
+							commands.RevokeTokenCommand(c.String("socket"), c.Args().First())
 							return nil
 						},
 					},

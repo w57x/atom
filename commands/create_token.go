@@ -7,7 +7,7 @@ import (
 	"net/rpc"
 )
 
-func CreateTokenCommand(socketPath string, uses int) {
+func CreateTokenCommand(socketPath string, uses int, asJson bool) {
 	// Dial the local daemon using a raw Unix socket
 	client, err := rpc.Dial("unix", socketPath)
 	if err != nil {
@@ -26,6 +26,11 @@ func CreateTokenCommand(socketPath string, uses int) {
 
 	if reply.Error != "" {
 		log.Fatalf("Daemon failed to create token: %s", reply.Error)
+	}
+
+	if asJson {
+		fmt.Printf(`{ "token": "%s" }`, reply.TokenString)
+		return
 	}
 
 	fmt.Printf("Token generated: %s\n", reply.TokenString)

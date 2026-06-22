@@ -3,7 +3,7 @@ server: 10.7.0.1
 
 [HELLO]
 [@CHALLENGE (random bits to guess encrypted with join_token)]
-[#ACCEPT_CHALLENGE (answer to the challange)]
+[#ACCEPT_CHALLENGE (answer to the challenge)]
 [#@CHALLENGE_ACK]
 
 [#JOIN_REQUEST (name, public wg key)]
