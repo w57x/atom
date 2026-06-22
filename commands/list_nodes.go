@@ -55,7 +55,7 @@ func ListNodesCommand(socketPath string, asJson bool) {
 			nameStr += " (Leader)"
 		}
 
-		name := aurora.White(nameStr)
+		var name any = nameStr
 		if node.IsLeader {
 			name = aurora.Green(nameStr).Bold()
 		} else if node.IsSelf {
@@ -72,11 +72,18 @@ func ListNodesCommand(socketPath string, asJson bool) {
 			pubKeyStr = pubKeyStr[:16] + "..."
 		}
 
+		statusStr := "Offline"
+		statusColor := aurora.Red(statusStr)
+		if node.IsOnline {
+			statusStr = "Online"
+			statusColor = aurora.Green(statusStr)
+		}
+
 		data = append(data, []any{
 			fmt.Sprint(name),
 			fmt.Sprint(aurora.Cyan(node.VPNIP)),
 			fmt.Sprint(aurora.Gray(12, endpointStr)),
-			fmt.Sprint(aurora.Green("Online")),
+			fmt.Sprint(statusColor),
 			fmt.Sprint(aurora.Gray(10, pubKeyStr)),
 		})
 	}

@@ -48,6 +48,7 @@ type NodeInfo struct {
 	PublicEndpoint string
 	IsLeader       bool
 	IsSelf         bool
+	IsOnline       bool
 }
 
 type NodeListArgs struct{}

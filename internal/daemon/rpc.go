@@ -12,6 +12,8 @@ import (
 	"net"
 	"net/rpc"
 	"os"
+	"sort"
+	"sync"
 	"time"
 
 	"github.com/hashicorp/raft"
@@ -193,16 +195,44 @@ func (l *LocalAPI) RemoveNode(args *api.NodeRemoveArgs, reply *api.NodeRemoveRep
 func (l *LocalAPI) ListNodes(args *api.NodeListArgs, reply *api.NodeListReply) error {
 	_, leaderID := l.raftNode.LeaderWithID()
 
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+
 	for _, node := range l.meshFSM.State.Nodes {
-		reply.Nodes = append(reply.Nodes, api.NodeInfo{
-			Name:           node.Name,
-			VPNIP:          node.VPNIP,
-			PubKey:         node.PubKey,
-			PublicEndpoint: node.PublicEndpoint,
-			IsLeader:       node.Name == string(leaderID),
-			IsSelf:         node.Name == l.config.Node.Name,
-		})
+		wg.Add(1)
+		go func(n fsm.Node) {
+			defer wg.Done()
+
+			isOnline := false
+			if n.Name == l.config.Node.Name {
+				isOnline = true
+			} else {
+				conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:7001", n.VPNIP), 1*time.Second)
+				if err == nil {
+					isOnline = true
+					conn.Close()
+				}
+			}
+
+			mu.Lock()
+			reply.Nodes = append(reply.Nodes, api.NodeInfo{
+				Name:           n.Name,
+				VPNIP:          n.VPNIP,
+				PubKey:         n.PubKey,
+				PublicEndpoint: n.PublicEndpoint,
+				IsLeader:       n.Name == string(leaderID),
+				IsSelf:         n.Name == l.config.Node.Name,
+				IsOnline:       isOnline,
+			})
+			mu.Unlock()
+		}(node)
 	}
+	wg.Wait()
+
+	sort.Slice(reply.Nodes, func(i, j int) bool {
+		return reply.Nodes[i].Name < reply.Nodes[j].Name
+	})
+
 	return nil
 }
 
