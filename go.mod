@@ -4,6 +4,7 @@ go 1.26.4
 
 require (
 	github.com/hashicorp/raft v1.7.3
+	github.com/urfave/cli/v3 v3.10.0
 	golang.zx2c4.com/wireguard/wgctrl v0.0.0-20241231184526-a9ab2273dd10
 	gopkg.in/yaml.v3 v3.0.1
 )

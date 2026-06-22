@@ -2,8 +2,11 @@ package daemon
 
 import (
 	"atom/internal/api"
+	"atom/internal/fsm"
+	"atom/internal/network"
 	"atom/internal/utils"
-	"encoding/json"
+	"bytes"
+	"encoding/gob"
 	"fmt"
 	"log/slog"
 	"net"
@@ -22,19 +25,25 @@ func (api *LocalAPI) CreateToken(args *api.TokenCreateArgs, reply *api.TokenCrea
 	tokenID := utils.GenerateID()
 	tokenSecret := utils.GenerateSecret()
 
-	payload := map[string]any{
-		"id":     tokenID,
-		"secret": tokenSecret,
-		"uses":   args.Uses,
+	payload := fsm.Token{
+		ID:       tokenID,
+		Secret:   tokenSecret,
+		UsesLeft: args.Uses,
 	}
 
-	cmdBytes, _ := json.Marshal(map[string]any{
-		"opcode":  "ATOM_JOIN_TOKEN",
-		"payload": payload,
-	})
+	cmd := network.Command{
+		Opcode:  network.CmdCreateJoinToken,
+		Payload: payload,
+	}
+
+	var buf bytes.Buffer
+	enc := gob.NewEncoder(&buf)
+	if err := enc.Encode(cmd); err != nil {
+		return err
+	}
 
 	// Propose to the Raft cluster
-	future := api.raftNode.Apply(cmdBytes, 2*time.Second)
+	future := api.raftNode.Apply(buf.Bytes(), 5*time.Second)
 	if err := future.Error(); err != nil {
 		reply.Error = err.Error()
 		return nil

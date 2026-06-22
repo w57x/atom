@@ -61,7 +61,7 @@ func Start(cfg config.Config) error {
 		localIP = assignedIP
 	}
 
-	if err := ensureWireguardInterface(localIP, cfg.Network.WireguardPort); err != nil {
+	if err := ensureWireguardInterface(localIP); err != nil {
 		return fmt.Errorf("failed to configure wg0 interface: %w", err)
 	}
 
@@ -105,7 +105,7 @@ func joinMeshCluster(cfg config.Config) (netip.Addr, error) {
 	panic("unimplemented")
 }
 
-func ensureWireguardInterface(ip netip.Addr, port int) error {
+func ensureWireguardInterface(ip netip.Addr) error {
 	linkName := "wg0" // FIXME: should not be constant like that
 	link, err := netlink.LinkByName(linkName)
 

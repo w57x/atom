@@ -15,3 +15,14 @@ type Message struct {
 	Opcode  byte
 	Payload []byte
 }
+
+type CommandKind uint8
+
+const (
+	CmdCreateJoinToken CommandKind = iota
+)
+
+type Command struct {
+	Opcode  CommandKind
+	Payload any
+}
