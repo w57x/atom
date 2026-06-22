@@ -1,8 +1,12 @@
 # <img src="assets/atom-logo.svg" width="100" alt="Atom Logo" align="left"> Atom
 
+<div align="right">
+
 **Atom** is a fully decentralized, self-healing, zero-trust mesh VPN. It marries
 the cryptographically secure, high-performance networking of **WireGuard** with
 the distributed consensus of **HashiCorp Raft**.
+
+</div>
 
 Unlike traditional hub-and-spoke VPNs or centrally coordinated overlays, Atom
 has **no single point of failure** and **no central coordination server**.
