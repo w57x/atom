@@ -126,8 +126,11 @@ api:
 Start the background daemon. If this is the bootstrapper, it will initialize the cluster. If it's a follower, it will perform the cryptographic handshake and join.
 
 ```bash
-atom daemon start -c config.yaml
+# Start the daemon in the background with the join token flag
+atom daemon -c config.yaml --join-token <TOKEN_HERE> &
 ```
+
+_You can also pass the token using the `ATOM_JOIN_TOKEN` environment variable_
 
 ### 2. Create Join Tokens
 

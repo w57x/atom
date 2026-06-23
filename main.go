@@ -65,6 +65,11 @@ func main() {
 						Aliases:   []string{"c"},
 						TakesFile: true,
 					},
+					&cli.StringFlag{
+						Name:    "join-token",
+						Usage:   "One-time join token for authenticating with the mesh (overrides config file). Can also be set via ATOM_JOIN_TOKEN env var.",
+						Sources: cli.EnvVars("ATOM_JOIN_TOKEN"),
+					},
 				},
 				Action: func(ctx context.Context, c *cli.Command) error {
 					configPath := c.String("config-path")
@@ -75,6 +80,16 @@ func main() {
 					cfg, err := config.LoadConfig(configPath)
 					if err != nil {
 						return fmt.Errorf("invalid config: %w", err)
+					}
+
+					if jt := c.String("join-token"); jt != "" {
+						cfg.Security.JoinToken = jt
+					} else if jt := os.Getenv("ATOM_JOIN_TOKEN"); jt != "" {
+						cfg.Security.JoinToken = jt
+					}
+
+					if !cfg.Node.Bootstrap && len(cfg.Security.JoinToken) == 0 {
+						return fmt.Errorf("No join token specified for a non bootstraper node")
 					}
 
 					if err := daemon.Start(*cfg); err != nil {
