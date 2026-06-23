@@ -19,13 +19,13 @@ type NodeConfig struct {
 }
 
 type NetworkConfig struct {
-	WireguardPort int `yaml:"wireguard_port"`
-	TCPJoinPort   int `yaml:"tcp_join_port"`
+	WireguardPort int    `yaml:"wireguard_port"`
+	TCPJoinPort   uint16 `yaml:"tcp_join_port"`
 }
 
 type ConsensusConfig struct {
 	DataDir  string `yaml:"data_dir"`
-	RaftPort int    `yaml:"raft_port"`
+	RaftPort uint16 `yaml:"raft_port"`
 }
 
 type SecurityConfig struct {
@@ -34,7 +34,8 @@ type SecurityConfig struct {
 }
 
 type ApiConfig struct {
-	SocketPath string `yaml:"socket_path"`
+	SocketPath      string `yaml:"socket_path"`
+	InternalRPCPort uint16 `yaml:"internal_rpc_port"`
 }
 
 type JoinConfig struct {
@@ -57,7 +58,26 @@ func LoadConfig(filePath string) (*Config, error) {
 		return nil, fmt.Errorf("failed to read config file %s: %w", filePath, err)
 	}
 
-	var storage Config
+	storage := Config{
+		Node: NodeConfig{
+			Bootstrap: false,
+		},
+		Network: NetworkConfig{
+			WireguardPort: 51820,
+			TCPJoinPort:   7700,
+		},
+		Consensus: ConsensusConfig{
+			DataDir:  "/var/lib/atom/data",
+			RaftPort: 7000,
+		},
+		Security: SecurityConfig{
+			PrivateKeyPath: "/etc/atom/private.key",
+		},
+		Api: ApiConfig{
+			SocketPath:      "/var/run/atom.sock",
+			InternalRPCPort: 7001,
+		},
+	}
 
 	if err := yaml.Unmarshal(fileBytes, &storage); err != nil {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)

@@ -29,10 +29,11 @@ type Message struct {
 }
 
 type JoinRequestPayload struct {
-	Name     string
-	PubKey   string
-	WGPort   int
-	RaftPort int
+	Name            string
+	PubKey          string
+	WGPort          int
+	RaftPort        uint16
+	InternalRPCPort uint16
 }
 
 type JoinAcceptPayload struct {

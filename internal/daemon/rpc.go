@@ -26,13 +26,17 @@ type LocalAPI struct {
 }
 
 func (api *LocalAPI) forwardToLeader(method string, args any, reply any) error {
-	leaderAddr, _ := api.raftNode.LeaderWithID()
+	leaderAddr, leaderID := api.raftNode.LeaderWithID()
 	if leaderAddr == "" {
 		return fmt.Errorf("no leader elected")
 	}
 
-	host, _, _ := net.SplitHostPort(string(leaderAddr))
-	internalRPCAddr := fmt.Sprintf("%s:7001", host)
+	leaderNode, ok := api.meshFSM.State.Nodes[string(leaderID)]
+	if !ok {
+		return fmt.Errorf("leader node not found in state")
+	}
+
+	internalRPCAddr := fmt.Sprintf("%s:%d", leaderNode.VPNIP, leaderNode.InternalRPCPort)
 
 	client, err := rpc.Dial("tcp", internalRPCAddr)
 	if err != nil {
@@ -158,7 +162,7 @@ func (l *LocalAPI) RemoveNode(args *api.NodeRemoveArgs, reply *api.NodeRemoveRep
 	if exists {
 		// Send a DaemonStop RPC to the target node over the VPN
 		// so it gracefully shuts down and doesn't get stuck in an election loop.
-		rpcAddr := fmt.Sprintf("%s:7001", node.VPNIP)
+		rpcAddr := fmt.Sprintf("%s:%d", node.VPNIP, node.InternalRPCPort)
 		client, err := rpc.Dial("tcp", rpcAddr)
 		if err == nil {
 			var stopReply api.NodeDestroyReply
@@ -207,7 +211,7 @@ func (l *LocalAPI) ListNodes(args *api.NodeListArgs, reply *api.NodeListReply) e
 			if n.Name == l.config.Node.Name {
 				isOnline = true
 			} else {
-				conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:7001", n.VPNIP), 1*time.Second)
+				conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", n.VPNIP, n.InternalRPCPort), 1*time.Second)
 				if err == nil {
 					isOnline = true
 					conn.Close()
@@ -237,7 +241,7 @@ func (l *LocalAPI) ListNodes(args *api.NodeListArgs, reply *api.NodeListReply) e
 }
 
 func StartInternalRPC(bindIP string, localAPI *LocalAPI) error {
-	addr := fmt.Sprintf("%s:7001", bindIP)
+	addr := fmt.Sprintf("%s:%d", bindIP, localAPI.config.Api.InternalRPCPort)
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("internal RPC failed to listen: %w", err)

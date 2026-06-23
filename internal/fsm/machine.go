@@ -22,8 +22,9 @@ type Node struct {
 	Name           string // The raft ServerID
 	VPNIP          string // e.g., "10.7.0.2" (Crucial for WG AllowedIPs)
 	PubKey         string // WireGuard Public Key
-	PublicEndpoint string // e.g., "82.123.45.67:51820" (The public internet IP + WG Port)
-	RaftPort       int    // e.g., 7000
+	PublicEndpoint  string // e.g., "82.123.45.67:51820" (The public internet IP + WG Port)
+	RaftPort        uint16 // e.g., 7000
+	InternalRPCPort uint16 // e.g., 7001
 }
 
 type Token struct {

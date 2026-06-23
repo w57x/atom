@@ -216,11 +216,12 @@ func Start(cfg config.Config) error {
 			cmd := network.Command{
 				Opcode: network.CmdAddNode,
 				Payload: fsm.Node{
-					Name:           cfg.Node.Name,
-					VPNIP:          localIP.String(),
-					PubKey:         pubKey,
-					PublicEndpoint: "",
-					RaftPort:       cfg.Consensus.RaftPort,
+					Name:            cfg.Node.Name,
+					VPNIP:           localIP.String(),
+					PubKey:          pubKey,
+					PublicEndpoint:  "",
+					RaftPort:        cfg.Consensus.RaftPort,
+					InternalRPCPort: cfg.Api.InternalRPCPort,
 				},
 			}
 			var buf bytes.Buffer
@@ -261,7 +262,7 @@ func Start(cfg config.Config) error {
 }
 
 func ensureWireguardInterface(ip netip.Addr) error {
-	linkName := "wg0" // FIXME: should not be constant like that
+	linkName := "wg0" // FIXME: should not be constant like that or at least configurable
 	link, err := netlink.LinkByName(linkName)
 
 	if err != nil {
@@ -411,10 +412,11 @@ func joinMeshCluster(cfg config.Config, pubKey string) (*network.JoinAcceptPaylo
 	err = wire.Write(network.Message{
 		Opcode: network.OpJoinRequest,
 		Payload: network.JoinRequestPayload{
-			Name:     cfg.Node.Name,
-			PubKey:   pubKey,
-			WGPort:   cfg.Network.WireguardPort,
-			RaftPort: cfg.Consensus.RaftPort,
+			Name:            cfg.Node.Name,
+			PubKey:          pubKey,
+			WGPort:          cfg.Network.WireguardPort,
+			RaftPort:        cfg.Consensus.RaftPort,
+			InternalRPCPort: cfg.Api.InternalRPCPort,
 		},
 	})
 
@@ -526,10 +528,11 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 
 	newNode := fsm.Node{
 		Name:           req.Name,
-		VPNIP:          newIP.String(),
-		PubKey:         req.PubKey,
-		PublicEndpoint: fmt.Sprintf("%s:%d", clientIP, req.WGPort),
-		RaftPort:       req.RaftPort,
+		VPNIP:           newIP.String(),
+		PubKey:          req.PubKey,
+		PublicEndpoint:  fmt.Sprintf("%s:%d", clientIP, req.WGPort),
+		RaftPort:        req.RaftPort,
+		InternalRPCPort: req.InternalRPCPort,
 	}
 
 	// A) Save to Raft State
