@@ -103,10 +103,10 @@ node:
 
 join:
   endpoint: "192.168.1.100:8080"
-  token: "atom.<id>.<secret>"
 
 security:
   private_key_path: "/etc/atom/private.key"
+  join_token: "atom.<id>.<secret>"
 
 network:
   wireguard_port: 51820
