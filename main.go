@@ -9,12 +9,16 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 
 	"github.com/urfave/cli/v3"
 )
 
 //go:embed config.yaml
 var DefaultConfigTemplate string
+
+//go:embed deploy/systemd/atom.service
+var SystemdServiceTemplate string
 
 var (
 	Version   = "Unknown"
@@ -56,6 +60,77 @@ func main() {
 				},
 			},
 			{
+				Name:  "systemd",
+				Usage: "Generate a systemd service file",
+				Flags: []cli.Flag{
+					&cli.StringFlag{
+						Name:    "output",
+						Usage:   "Path to save the generated service file",
+						Aliases: []string{"o"},
+						Value:   "atom.service",
+					},
+					&cli.StringFlag{
+						Name:    "user",
+						Usage:   "Specify the user that will run the service",
+						Aliases: []string{"u"},
+						Value:   "atom",
+					},
+					&cli.StringFlag{
+						Name:    "group",
+						Usage:   "Specify the group that will own the service",
+						Aliases: []string{"g"},
+						Value:   "atom",
+					},
+					&cli.StringFlag{
+						Name:      "working-dir",
+						Usage:     "Specify the working directory",
+						Aliases:   []string{"w"},
+						Value:     "/opt/atom",
+						TakesFile: true,
+					},
+					&cli.StringFlag{
+						Name:    "join-token",
+						Usage:   "One-time join token for authenticating with the mesh. Env Source",
+						Sources: cli.EnvVars("ATOM_JOIN_TOKEN"),
+						Value:   "",
+					},
+				},
+				Action: func(ctx context.Context, c *cli.Command) error {
+					outputPath := c.String("output")
+					user := c.String("user")
+					group := c.String("group")
+					workingDir := c.String("working-dir")
+					joinToken := ""
+
+					if jt := c.String("join-token"); jt != "" {
+						joinToken = jt
+					} else if jt := os.Getenv("ATOM_JOIN_TOKEN"); jt != "" {
+						joinToken = jt
+					}
+
+					finalSystem :=
+						strings.ReplaceAll(
+							strings.ReplaceAll(
+								strings.ReplaceAll(
+									SystemdServiceTemplate, "{user}", user,
+								), "{group}", group,
+							), "{wd}", workingDir,
+						)
+
+					if len(joinToken) > 0 {
+						finalSystem = strings.ReplaceAll(finalSystem, "{jointoken}", fmt.Sprintf(`Environment="ATOM_JOIN_TOKEN=%s"`, joinToken))
+					} else {
+						finalSystem = strings.ReplaceAll(finalSystem, "{jointoken}", "")
+					}
+
+					if err := os.WriteFile(outputPath, []byte(finalSystem), 0644); err != nil {
+						return fmt.Errorf("failed to write systemd file: %w", err)
+					}
+					fmt.Printf("Successfully generated service file at %s\n", outputPath)
+					return nil
+				},
+			},
+			{
 				Name:  "daemon",
 				Usage: "Start the mesh node",
 				Flags: []cli.Flag{
@@ -67,7 +142,7 @@ func main() {
 					},
 					&cli.StringFlag{
 						Name:    "join-token",
-						Usage:   "One-time join token for authenticating with the mesh (overrides config file). Can also be set via ATOM_JOIN_TOKEN env var.",
+						Usage:   "One-time join token for authenticating with the mesh. Env Source",
 						Sources: cli.EnvVars("ATOM_JOIN_TOKEN"),
 					},
 				},

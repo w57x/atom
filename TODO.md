@@ -2,7 +2,7 @@
 
 ## System Integration
 
-- [ ] **Systemd Service Files**: Create a `.service` file configuration so the
+- [x] **Systemd Service Files**: Create a `.service` file configuration so the
       Atom daemon can run continuously in the background on boot, properly
       handle crashes, and manage logs through journalctl.
 

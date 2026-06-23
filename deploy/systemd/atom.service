@@ -1,0 +1,50 @@
+[Unit]
+Description=Atom Mesh VPN Daemon
+Documentation=https://github.com/w57x/atom
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+# Run as a dedicated non-root user (e.g. atom) for better isolation.
+# Ensure this user exists and has ownership of {wd}
+User={user}
+Group={group}
+
+# We set the working directory to where all atom files live so everything is contained
+WorkingDirectory={wd}
+
+# The command to start the daemon
+ExecStart={wd}/atom daemon --config-path {wd}/config.yaml
+
+# Gracefully stop the daemon to step down from Raft leadership and close network connections
+ExecStop={wd}/atom stop --socket {wd}/atom.sock
+
+# Give the non-root process the ability to manage WireGuard network interfaces
+# This replaces the need to manually run `setcap cap_net_admin=eip atom`
+AmbientCapabilities=CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_NET_ADMIN
+
+# Basic Security Sandboxing
+ProtectSystem=strict
+ReadWritePaths={wd}
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectKernelLogs=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictRealtime=yes
+
+# Restart Policy
+Restart=on-failure
+RestartSec=5s
+
+# Pass Join Token via Environment (Uncomment to use if automated)
+# Environment="ATOM_JOIN_TOKEN=your_token_here"
+{jointoken}
+
+[Install]
+WantedBy=multi-user.target
