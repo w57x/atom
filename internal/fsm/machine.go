@@ -18,10 +18,18 @@ import (
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 
+type AuxDevice struct {
+	Id          string // Unique device identifier (uuid v7)
+	Type        string // e.g., "phone", "pc"
+	GatewayNode string // The Name of the core node acting as the gateway
+	PublicKey   string // The base64 WireGuard public key of the device
+	AssignedIP  string // The assigned mesh IP (e.g., "10.0.0.45")
+}
+
 type Node struct {
-	Name           string // The raft ServerID
-	VPNIP          string // e.g., "10.7.0.2" (Crucial for WG AllowedIPs)
-	PubKey         string // WireGuard Public Key
+	Name            string // The raft ServerID
+	VPNIP           string // e.g., "10.7.0.2" (Crucial for WG AllowedIPs)
+	PubKey          string // WireGuard Public Key
 	PublicEndpoint  string // e.g., "82.123.45.67:51820" (The public internet IP + WG Port)
 	RaftPort        uint16 // e.g., 7000
 	InternalRPCPort uint16 // e.g., 7001
@@ -62,6 +70,7 @@ type MeshState struct {
 	NetworkCIDR string
 	Nodes       map[string]Node
 	Tokens      map[string]Token
+	AuxDevices  map[string]AuxDevice
 }
 
 type MeshFSM struct {
@@ -109,11 +118,19 @@ func (f *MeshFSM) Apply(log *raft.Log) any {
 			}
 
 			_, ipNet, _ := net.ParseCIDR(node.VPNIP + "/32")
+			allowedIPs := []net.IPNet{*ipNet}
+
+			for _, aux := range f.State.AuxDevices {
+				if aux.GatewayNode == node.Name {
+					_, auxIpNet, _ := net.ParseCIDR(aux.AssignedIP + "/32")
+					allowedIPs = append(allowedIPs, *auxIpNet)
+				}
+			}
 
 			peerCfg := wgtypes.PeerConfig{
 				PublicKey:         pubKey,
 				ReplaceAllowedIPs: true,
-				AllowedIPs:        []net.IPNet{*ipNet},
+				AllowedIPs:        allowedIPs,
 			}
 
 			if len(node.PublicEndpoint) != 0 {
@@ -190,6 +207,103 @@ func (f *MeshFSM) Apply(log *raft.Log) any {
 		} else {
 			slog.Error("Invalid payload type for CmdSetNetworkCIDR")
 		}
+
+	case network.CmdAddAuxDevice:
+		if device, ok := cmd.Payload.(AuxDevice); ok {
+			f.State.AuxDevices[device.Id] = device
+
+			dev, err := f.WGClient.Device("wg0")
+			if err != nil {
+				slog.Error("Failed to get wg0 device", "err", err)
+				return err
+			}
+
+			// Find out our own node name
+			var ourNodeName string
+			for name, node := range f.State.Nodes {
+				if node.PubKey == dev.PublicKey.String() {
+					ourNodeName = name
+					break
+				}
+			}
+
+			_, ipNet, _ := net.ParseCIDR(device.AssignedIP + "/32")
+
+			if ourNodeName == device.GatewayNode {
+				// CASE 1 - We are the gateway for this device
+				pubKey, err := wgtypes.ParseKey(device.PublicKey)
+				if err != nil {
+					slog.Error("Failed to parse aux device public key", "err", err)
+					return err
+				}
+
+				peerCfg := wgtypes.PeerConfig{
+					PublicKey:         pubKey,
+					ReplaceAllowedIPs: true,
+					AllowedIPs:        []net.IPNet{*ipNet},
+				}
+
+				err = f.WGClient.ConfigureDevice("wg0", wgtypes.Config{
+					Peers: []wgtypes.PeerConfig{peerCfg},
+				})
+				if err != nil {
+					slog.Error("Failed to configure wg peer for aux device", "err", err)
+				}
+			} else {
+				// CASE 2 - We are not the gateway. We must update the gateway node's AllowedIPs
+				gatewayNode, exists := f.State.Nodes[device.GatewayNode]
+				if !exists {
+					return nil // Gateway node doesn't exist yet or was removed
+				}
+
+				pubKey, err := wgtypes.ParseKey(gatewayNode.PubKey)
+				if err != nil {
+					slog.Error("Failed to parse gateway node public key", "err", err)
+					return err
+				}
+
+				// Rebuild AllowedIPs for the gateway node
+				_, gwIpNet, _ := net.ParseCIDR(gatewayNode.VPNIP + "/32")
+				allowedIPs := []net.IPNet{*gwIpNet}
+
+				for _, aux := range f.State.AuxDevices {
+					if aux.GatewayNode == gatewayNode.Name {
+						_, auxIpNet, _ := net.ParseCIDR(aux.AssignedIP + "/32")
+						allowedIPs = append(allowedIPs, *auxIpNet)
+					}
+				}
+
+				peerCfg := wgtypes.PeerConfig{
+					PublicKey:         pubKey,
+					ReplaceAllowedIPs: true,
+					AllowedIPs:        allowedIPs,
+				}
+
+				if len(gatewayNode.PublicEndpoint) != 0 {
+					endpoint, err := net.ResolveUDPAddr("udp", gatewayNode.PublicEndpoint)
+					if err == nil {
+						peerCfg.Endpoint = endpoint
+					}
+				}
+
+				err = f.WGClient.ConfigureDevice("wg0", wgtypes.Config{
+					Peers: []wgtypes.PeerConfig{peerCfg},
+				})
+				if err != nil {
+					slog.Error("Failed to update gateway wg peer for aux device", "err", err)
+				}
+			}
+
+			// Add the route to the new IP for both cases (via wg0)
+			link, err := netlink.LinkByName("wg0")
+			if err == nil {
+				route := &netlink.Route{
+					LinkIndex: link.Attrs().Index,
+					Dst:       ipNet,
+				}
+				netlink.RouteReplace(route)
+			}
+		}
 	}
 
 	return nil
@@ -213,6 +327,14 @@ func (f *MeshFSM) Restore(rc io.ReadCloser) error {
 		return err
 	}
 
+	var ourNodeName string
+	for name, node := range f.State.Nodes {
+		if node.PubKey == dev.PublicKey.String() {
+			ourNodeName = name
+			break
+		}
+	}
+
 	var peers []wgtypes.PeerConfig
 	for _, node := range f.State.Nodes {
 		if node.PubKey == dev.PublicKey.String() {
@@ -221,11 +343,19 @@ func (f *MeshFSM) Restore(rc io.ReadCloser) error {
 
 		pubKey, _ := wgtypes.ParseKey(node.PubKey)
 		_, ipNet, _ := net.ParseCIDR(node.VPNIP + "/32")
+		allowedIPs := []net.IPNet{*ipNet}
+
+		for _, aux := range f.State.AuxDevices {
+			if aux.GatewayNode == node.Name {
+				_, auxIpNet, _ := net.ParseCIDR(aux.AssignedIP + "/32")
+				allowedIPs = append(allowedIPs, *auxIpNet)
+			}
+		}
 
 		peerCfg := wgtypes.PeerConfig{
 			PublicKey:         pubKey,
 			ReplaceAllowedIPs: true,
-			AllowedIPs:        []net.IPNet{*ipNet},
+			AllowedIPs:        allowedIPs,
 		}
 
 		if node.PublicEndpoint != "" {
@@ -240,6 +370,30 @@ func (f *MeshFSM) Restore(rc io.ReadCloser) error {
 			route := &netlink.Route{
 				LinkIndex: link.Attrs().Index,
 				Dst:       ipNet,
+			}
+			netlink.RouteReplace(route)
+		}
+	}
+
+	// Now we also add peers for AuxDevices where we are the GatewayNode
+	for _, aux := range f.State.AuxDevices {
+		_, auxIpNet, _ := net.ParseCIDR(aux.AssignedIP + "/32")
+
+		if aux.GatewayNode == ourNodeName {
+			pubKey, _ := wgtypes.ParseKey(aux.PublicKey)
+			peerCfg := wgtypes.PeerConfig{
+				PublicKey:         pubKey,
+				ReplaceAllowedIPs: true,
+				AllowedIPs:        []net.IPNet{*auxIpNet},
+			}
+			peers = append(peers, peerCfg)
+		}
+
+		link, err := netlink.LinkByName("wg0")
+		if err == nil {
+			route := &netlink.Route{
+				LinkIndex: link.Attrs().Index,
+				Dst:       auxIpNet,
 			}
 			netlink.RouteReplace(route)
 		}
@@ -270,4 +424,5 @@ func (s *fsmSnapshot) Release() {}
 func init() {
 	gob.Register(Token{})
 	gob.Register(Node{})
+	gob.Register(AuxDevice{})
 }

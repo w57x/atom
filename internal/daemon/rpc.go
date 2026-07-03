@@ -5,6 +5,7 @@ import (
 	"atom/internal/api"
 	"atom/internal/fsm"
 	"atom/internal/network"
+	"atom/internal/utils"
 	"bytes"
 	"encoding/gob"
 	"fmt"
@@ -45,6 +46,73 @@ func (api *LocalAPI) forwardToLeader(method string, args any, reply any) error {
 	defer client.Close()
 
 	return client.Call(method, args, reply)
+}
+
+func (l *LocalAPI) AddAuxiliaryDevice(args *api.AuxAddArgs, reply *api.AuxAddReply) error {
+	if l.raftNode.State() != raft.Leader {
+		return l.forwardToLeader("Atom.AddAuxiliaryDevice", args, reply)
+	}
+
+	if node, exists := l.meshFSM.State.Nodes[args.Info.GatewayNode]; exists {
+		newIp, err := GetNextValidIP(*l.meshFSM, l.config)
+		if err != nil {
+			slog.Error("failed to get valid IP", "err", err)
+			reply.Error = fmt.Errorf("unable to add the device :: Cause(IpAttributionFailure)")
+			return nil
+		}
+
+		device := fsm.AuxDevice{
+			AssignedIP:  newIp.String(),
+			Id:          utils.GenerateUUID(),
+			Type:        args.Info.Type,
+			GatewayNode: node.Name,
+			PublicKey:   args.Info.PublicKey,
+		}
+
+		cmd := network.Command{
+			Opcode:  network.CmdAddAuxDevice,
+			Payload: device,
+		}
+
+		var buf bytes.Buffer
+		enc := gob.NewEncoder(&buf)
+		if err := enc.Encode(cmd); err != nil {
+			return err
+		}
+
+		applyFuture := l.raftNode.Apply(buf.Bytes(), 5*time.Second)
+		if err := applyFuture.Error(); err != nil {
+			reply.Error = err
+		} else {
+			reply.AssignedIP = device.AssignedIP
+			reply.DeviceId = device.Id
+
+			endpointLine := ""
+			if node.PublicEndpoint != "" {
+				endpointLine = fmt.Sprintf("Endpoint = %s\n", node.PublicEndpoint)
+			}
+
+			reply.WGConfig = fmt.Sprintf(`[Interface]
+# Paste your generated PrivateKey below
+PrivateKey = 
+Address = %s/32
+DNS = %s
+
+[Peer]
+PublicKey = %s
+%sAllowedIPs = %s
+PersistentKeepalive = 25`,
+				device.AssignedIP,
+				node.VPNIP,
+				node.PubKey,
+				endpointLine,
+				l.meshFSM.State.NetworkCIDR)
+		}
+	} else {
+		reply.Error = fmt.Errorf("no node named `%s` found", args.Info.GatewayNode)
+	}
+
+	return nil
 }
 
 func (api *LocalAPI) CreateToken(args *api.TokenCreateArgs, reply *api.TokenCreateReply) error {

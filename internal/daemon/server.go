@@ -433,42 +433,6 @@ func joinMeshCluster(cfg config.Config, pubKey string) (*network.JoinAcceptPaylo
 	return &payload, nil
 }
 
-func (d *Daemon) getNextValidIP() (netip.Addr, error) {
-	var prefixStr string
-	if d.fsm.State.NetworkCIDR != "" {
-		prefixStr = d.fsm.State.NetworkCIDR
-	} else {
-		prefixStr = fmt.Sprintf("%s/%d", d.cfg.Node.NetworkLayer.IP, d.cfg.Node.NetworkLayer.CIDR)
-	}
-
-	prefix, err := netip.ParsePrefix(prefixStr)
-	if err != nil {
-		return netip.Addr{}, err
-	}
-
-	candidateIP := prefix.Masked().Addr().Next()
-
-	for {
-		used := false
-		for _, existingNode := range d.fsm.State.Nodes {
-			if existingNode.VPNIP == candidateIP.String() {
-				used = true
-				break
-			}
-		}
-
-		if !used {
-			return candidateIP, nil
-		}
-
-		candidateIP = candidateIP.Next()
-
-		if !prefix.Contains(candidateIP) {
-			return netip.Addr{}, fmt.Errorf("IP pool exhausted")
-		}
-	}
-}
-
 func (d *Daemon) handleConnection(conn net.Conn) {
 	defer conn.Close()
 
@@ -520,14 +484,14 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 	req := joinMsg.Payload.(network.JoinRequestPayload)
 	clientIP := conn.RemoteAddr().(*net.TCPAddr).IP.String()
 
-	newIP, err := d.getNextValidIP()
+	newIP, err := GetNextValidIP(*d.fsm, d.cfg)
 	if err != nil {
 		slog.Error("failed to get valid IP", "err", err)
 		return
 	}
 
 	newNode := fsm.Node{
-		Name:           req.Name,
+		Name:            req.Name,
 		VPNIP:           newIP.String(),
 		PubKey:          req.PubKey,
 		PublicEndpoint:  fmt.Sprintf("%s:%d", clientIP, req.WGPort),
@@ -589,4 +553,49 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 			ServerVPNIP:  serverNode.VPNIP,
 		},
 	})
+}
+
+func GetNextValidIP(fsm fsm.MeshFSM, cfg config.Config) (netip.Addr, error) {
+	var prefixStr string
+	if fsm.State.NetworkCIDR != "" {
+		prefixStr = fsm.State.NetworkCIDR
+	} else {
+		prefixStr = fmt.Sprintf("%s/%d", cfg.Node.NetworkLayer.IP, cfg.Node.NetworkLayer.CIDR)
+	}
+
+	prefix, err := netip.ParsePrefix(prefixStr)
+	if err != nil {
+		return netip.Addr{}, err
+	}
+
+	candidateIP := prefix.Masked().Addr().Next()
+
+	for {
+		used := false
+		for _, existingNode := range fsm.State.Nodes {
+			if existingNode.VPNIP == candidateIP.String() {
+				used = true
+				break
+			}
+		}
+
+		if !used {
+			for _, existingAuxDevice := range fsm.State.AuxDevices {
+				if existingAuxDevice.AssignedIP == candidateIP.String() {
+					used = true
+					break
+				}
+			}
+		}
+
+		if !used {
+			return candidateIP, nil
+		}
+
+		candidateIP = candidateIP.Next()
+
+		if !prefix.Contains(candidateIP) {
+			return netip.Addr{}, fmt.Errorf("IP pool exhausted")
+		}
+	}
 }

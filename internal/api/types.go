@@ -57,3 +57,20 @@ type NodeListReply struct {
 	Nodes []NodeInfo
 	Error string
 }
+
+type AuxInfo struct {
+	Type        string // e.g., "phone", "pc"
+	GatewayNode string // The Name of the core node acting as the gateway
+	PublicKey   string // The base64 WireGuard public key of the device
+}
+
+type AuxAddArgs struct {
+	Info AuxInfo
+}
+
+type AuxAddReply struct {
+	Error      error
+	WGConfig   string
+	AssignedIP string
+	DeviceId   string
+}

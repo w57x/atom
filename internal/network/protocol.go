@@ -159,6 +159,8 @@ const (
 	CmdRevokeToken
 	CmdRemoveNode
 	CmdSetNetworkCIDR
+	CmdAddAuxDevice
+	CmdRemoveAuxDevice
 )
 
 type Command struct {

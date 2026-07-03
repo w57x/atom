@@ -3,6 +3,7 @@ package main
 import (
 	"atom/commands"
 	"atom/config"
+	"atom/internal/api"
 	"atom/internal/daemon"
 	"context"
 	_ "embed"
@@ -187,6 +188,63 @@ func main() {
 						},
 						Action: func(ctx context.Context, c *cli.Command) error {
 							commands.StopDaemonCommand(c.String("socket"))
+							return nil
+						},
+					},
+				},
+			},
+			// atom aux new --type=phone --from <node_name> --pubkey <base64_device_pubkey>
+			{
+				Name:  "aux",
+				Usage: "Manage auxiliary devices",
+				Commands: []*cli.Command{
+					{
+						Name:  "add",
+						Usage: "Add a new auxiliary device to the system",
+						Flags: []cli.Flag{
+							&cli.StringFlag{
+								Name:      "socket",
+								Usage:     "Path to the daemon unix socket",
+								Aliases:   []string{"s"},
+								TakesFile: true,
+								Value:     "/var/run/atom.sock",
+							},
+							&cli.StringFlag{
+								Name:     "type",
+								Usage:    "The kind of device that is being added",
+								Aliases:  []string{"t"},
+								Required: true,
+							},
+							&cli.StringFlag{
+								Name:     "from",
+								Usage:    "The node to consider as a connection gateway for this device",
+								Aliases:  []string{"f"},
+								Required: true,
+							},
+							&cli.StringFlag{
+								Name:     "pubkey",
+								Usage:    "The device wireguard public key",
+								Aliases:  []string{"k"},
+								Required: true,
+							},
+							&cli.BoolFlag{
+								Name:    "json",
+								Usage:   "Output as JSON",
+								Aliases: []string{"j"},
+							},
+						},
+
+						Action: func(ctx context.Context, c *cli.Command) error {
+							commands.AddAuxiliaryDevice(
+								c.String("socket"),
+								api.AuxInfo{
+									Type:        c.String("type"),
+									GatewayNode: c.String("from"),
+									PublicKey:   c.String("pubkey"),
+								},
+								c.Bool("json"),
+							)
+
 							return nil
 						},
 					},

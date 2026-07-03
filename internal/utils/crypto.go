@@ -7,7 +7,18 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+
+	"github.com/google/uuid"
 )
+
+func GenerateUUID() string {
+	genId, err := uuid.NewV7()
+	if err != nil {
+		panic("failed to create uuid: " + err.Error())
+	}
+
+	return genId.String()
+}
 
 func GenerateID() string {
 	b := make([]byte, 6)
