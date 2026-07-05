@@ -34,6 +34,10 @@ The mesh completely orchestrates itself.
   The Bootstrapper securely assigns IPs and propagates the new WireGuard
   public keys across the entire mesh in milliseconds.
 
+- **Embedded DNS Proxy:** A built-in split-tunnel DNS server securely resolves
+  internal `.atom` addresses (like `node-1.atom`) while proxying standard
+  internet traffic to your host's native resolvers with fallbacks.
+
 ## Architecture
 
 Atom abstracts away the complexity of managing WireGuard keys and OS-level routing.
@@ -216,3 +220,18 @@ interfaces on the Gateway node:
 ```bash
 sudo ufw route allow in on wg0 out on wg0
 ```
+
+### 7. Internal DNS System
+
+Atom includes a native, embedded DNS server that binds to the WireGuard
+interface (port 53). It automatically resolves internal node names.
+
+- **Internal Resolution:** Querying `node-1.atom` will perfectly resolve to its
+  assigned VPN IP (e.g., `10.7.0.1`).
+- **Split-Tunnel Proxying:** Any non-`.atom` queries are seamlessly proxied to
+  the host OS's native DNS servers (found in `/etc/resolv.conf`). If the local
+  network DNS fails or times out, it features a fallback to `8.8.8.8` and `1.1.1.1`.
+
+If you use an Auxiliary Device like a mobile phone, just set the DNS server in
+your WireGuard app to the Gateway node's VPN IP, and everything will perfectly
+resolve.
