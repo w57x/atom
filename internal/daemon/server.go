@@ -64,8 +64,9 @@ func Start(cfg config.Config) error {
 
 	meshFSM := &fsm.MeshFSM{
 		State: &fsm.MeshState{
-			Nodes:  make(map[string]fsm.Node),
-			Tokens: make(map[string]fsm.Token),
+			Nodes:      make(map[string]fsm.Node),
+			Tokens:     make(map[string]fsm.Token),
+			AuxDevices: make(map[string]fsm.AuxDevice),
 		},
 		WGClient: wgClient,
 	}
