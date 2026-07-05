@@ -18,7 +18,7 @@ func AddAuxiliaryDevice(socketPath string, info api.AuxInfo, asJson bool) {
 	args := &api.AuxAddArgs{Info: info}
 	var reply api.AuxAddReply
 
-	err = client.Call("Atom.AddAuxiliaryDevice", args, reply)
+	err = client.Call("Atom.AddAuxiliaryDevice", args, &reply)
 	if err != nil {
 		log.Fatalf("RPC communication failed %v", err)
 	}
