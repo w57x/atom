@@ -103,7 +103,7 @@ func (f *MeshFSM) Apply(log *raft.Log) any {
 
 			dev, err := f.WGClient.Device(f.InterfaceName)
 			if err != nil {
-				slog.Error("Failed to get wg0 device", "err", err)
+				slog.Error(fmt.Sprintf("Failed to get %s device", f.InterfaceName), "err", err)
 				return err
 			}
 
@@ -215,7 +215,7 @@ func (f *MeshFSM) Apply(log *raft.Log) any {
 
 			dev, err := f.WGClient.Device(f.InterfaceName)
 			if err != nil {
-				slog.Error("Failed to get wg0 device", "err", err)
+				slog.Error(fmt.Sprintf("Failed to get %s device", f.InterfaceName), "err", err)
 				return err
 			}
 
@@ -295,7 +295,7 @@ func (f *MeshFSM) Apply(log *raft.Log) any {
 				}
 			}
 
-			// Add the route to the new IP for both cases (via wg0)
+			// Add the route to the new IP for both cases
 			link, err := netlink.LinkByName(f.InterfaceName)
 			if err == nil {
 				route := &netlink.Route{
