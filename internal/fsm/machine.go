@@ -74,8 +74,9 @@ type MeshState struct {
 }
 
 type MeshFSM struct {
-	State    *MeshState
-	WGClient *wgctrl.Client
+	State         *MeshState
+	WGClient      *wgctrl.Client
+	InterfaceName string
 }
 
 func (f *MeshFSM) Apply(log *raft.Log) any {
@@ -100,7 +101,7 @@ func (f *MeshFSM) Apply(log *raft.Log) any {
 			slog.Info(fmt.Sprintf("New joined node %s", node.Name))
 			f.State.Nodes[node.Name] = node
 
-			dev, err := f.WGClient.Device("wg0")
+			dev, err := f.WGClient.Device(f.InterfaceName)
 			if err != nil {
 				slog.Error("Failed to get wg0 device", "err", err)
 				return err
@@ -140,14 +141,14 @@ func (f *MeshFSM) Apply(log *raft.Log) any {
 				}
 			}
 
-			err = f.WGClient.ConfigureDevice("wg0", wgtypes.Config{
+			err = f.WGClient.ConfigureDevice(f.InterfaceName, wgtypes.Config{
 				Peers: []wgtypes.PeerConfig{peerCfg},
 			})
 			if err != nil {
 				slog.Error("Failed to configure wg peer", "err", err)
 			}
 
-			link, err := netlink.LinkByName("wg0")
+			link, err := netlink.LinkByName(f.InterfaceName)
 			if err == nil {
 				route := &netlink.Route{
 					LinkIndex: link.Attrs().Index,
@@ -186,7 +187,7 @@ func (f *MeshFSM) Apply(log *raft.Log) any {
 			// Remove from WireGuard peer list
 			pubKey, err := wgtypes.ParseKey(node.PubKey)
 			if err == nil {
-				err = f.WGClient.ConfigureDevice("wg0", wgtypes.Config{
+				err = f.WGClient.ConfigureDevice(f.InterfaceName, wgtypes.Config{
 					Peers: []wgtypes.PeerConfig{
 						{
 							PublicKey: pubKey,
@@ -212,7 +213,7 @@ func (f *MeshFSM) Apply(log *raft.Log) any {
 		if device, ok := cmd.Payload.(AuxDevice); ok {
 			f.State.AuxDevices[device.Id] = device
 
-			dev, err := f.WGClient.Device("wg0")
+			dev, err := f.WGClient.Device(f.InterfaceName)
 			if err != nil {
 				slog.Error("Failed to get wg0 device", "err", err)
 				return err
@@ -243,7 +244,7 @@ func (f *MeshFSM) Apply(log *raft.Log) any {
 					AllowedIPs:        []net.IPNet{*ipNet},
 				}
 
-				err = f.WGClient.ConfigureDevice("wg0", wgtypes.Config{
+				err = f.WGClient.ConfigureDevice(f.InterfaceName, wgtypes.Config{
 					Peers: []wgtypes.PeerConfig{peerCfg},
 				})
 				if err != nil {
@@ -286,7 +287,7 @@ func (f *MeshFSM) Apply(log *raft.Log) any {
 					}
 				}
 
-				err = f.WGClient.ConfigureDevice("wg0", wgtypes.Config{
+				err = f.WGClient.ConfigureDevice(f.InterfaceName, wgtypes.Config{
 					Peers: []wgtypes.PeerConfig{peerCfg},
 				})
 				if err != nil {
@@ -295,7 +296,7 @@ func (f *MeshFSM) Apply(log *raft.Log) any {
 			}
 
 			// Add the route to the new IP for both cases (via wg0)
-			link, err := netlink.LinkByName("wg0")
+			link, err := netlink.LinkByName(f.InterfaceName)
 			if err == nil {
 				route := &netlink.Route{
 					LinkIndex: link.Attrs().Index,
@@ -322,7 +323,7 @@ func (f *MeshFSM) Restore(rc io.ReadCloser) error {
 		return err
 	}
 
-	dev, err := f.WGClient.Device("wg0")
+	dev, err := f.WGClient.Device(f.InterfaceName)
 	if err != nil {
 		return err
 	}
@@ -365,7 +366,7 @@ func (f *MeshFSM) Restore(rc io.ReadCloser) error {
 
 		peers = append(peers, peerCfg)
 
-		link, err := netlink.LinkByName("wg0")
+		link, err := netlink.LinkByName(f.InterfaceName)
 		if err == nil {
 			route := &netlink.Route{
 				LinkIndex: link.Attrs().Index,
@@ -389,7 +390,7 @@ func (f *MeshFSM) Restore(rc io.ReadCloser) error {
 			peers = append(peers, peerCfg)
 		}
 
-		link, err := netlink.LinkByName("wg0")
+		link, err := netlink.LinkByName(f.InterfaceName)
 		if err == nil {
 			route := &netlink.Route{
 				LinkIndex: link.Attrs().Index,
@@ -399,7 +400,7 @@ func (f *MeshFSM) Restore(rc io.ReadCloser) error {
 		}
 	}
 
-	return f.WGClient.ConfigureDevice("wg0", wgtypes.Config{
+	return f.WGClient.ConfigureDevice(f.InterfaceName, wgtypes.Config{
 		ReplacePeers: true,
 		Peers:        peers,
 	})

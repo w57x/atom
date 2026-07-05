@@ -68,7 +68,8 @@ func Start(cfg config.Config) error {
 			Tokens:     make(map[string]fsm.Token),
 			AuxDevices: make(map[string]fsm.AuxDevice),
 		},
-		WGClient: wgClient,
+		WGClient:      wgClient,
+		InterfaceName: cfg.Network.InterfaceName,
 	}
 
 	var localIP netip.Addr
@@ -122,11 +123,11 @@ func Start(cfg config.Config) error {
 		}
 	}
 
-	if err := ensureWireguardInterface(localIP); err != nil {
-		return fmt.Errorf("failed to configure wg0 interface: %w", err)
+	if err := ensureWireguardInterface(localIP, cfg.Network.InterfaceName); err != nil {
+		return fmt.Errorf("failed to configure %s interface: %w", cfg.Network.InterfaceName, err)
 	}
 
-	err = wgClient.ConfigureDevice("wg0", wgtypes.Config{
+	err = wgClient.ConfigureDevice(cfg.Network.InterfaceName, wgtypes.Config{
 		PrivateKey: &privKey,
 		ListenPort: &cfg.Network.WireguardPort,
 	})
@@ -164,13 +165,13 @@ func Start(cfg config.Config) error {
 			PersistentKeepaliveInterval: &keepalive,
 		}
 
-		if err := wgClient.ConfigureDevice("wg0", wgtypes.Config{
+		if err := wgClient.ConfigureDevice(cfg.Network.InterfaceName, wgtypes.Config{
 			Peers: []wgtypes.PeerConfig{peerCfg},
 		}); err != nil {
 			return fmt.Errorf("failed to add server wg peer: %w", err)
 		}
 
-		link, err := netlink.LinkByName("wg0")
+		link, err := netlink.LinkByName(cfg.Network.InterfaceName)
 		if err == nil {
 			route := &netlink.Route{
 				LinkIndex: link.Attrs().Index,
@@ -242,6 +243,8 @@ func Start(cfg config.Config) error {
 		}()
 	}
 
+	StartDNSServer(meshFSM, localIP.String())
+
 	go func() {
 		errChan <- StartUnixRPC(cfg.Api.SocketPath, localAPI)
 	}()
@@ -262,8 +265,7 @@ func Start(cfg config.Config) error {
 	}
 }
 
-func ensureWireguardInterface(ip netip.Addr) error {
-	linkName := "wg0" // FIXME: should not be constant like that or at least configurable
+func ensureWireguardInterface(ip netip.Addr, linkName string) error {
 	link, err := netlink.LinkByName(linkName)
 
 	if err != nil {
