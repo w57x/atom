@@ -21,10 +21,10 @@ ExecStart={wd}/atom daemon --config-path {wd}/config.yaml
 # Gracefully stop the daemon to step down from Raft leadership and close network connections
 ExecStop={wd}/atom stop --socket {wd}/atom.sock
 
-# Give the non-root process the ability to manage WireGuard network interfaces
-# This replaces the need to manually run `setcap cap_net_admin=eip atom`
-AmbientCapabilities=CAP_NET_ADMIN
-CapabilityBoundingSet=CAP_NET_ADMIN
+# Give the non-root process the ability to manage WireGuard network interfaces and bind to Port 53
+# This replaces the need to manually run `setcap 'cap_net_admin,cap_net_bind_service=+ep' atom`
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
 
 # Basic Security Sandboxing
 ProtectSystem=strict

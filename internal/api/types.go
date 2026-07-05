@@ -74,3 +74,27 @@ type AuxAddReply struct {
 	AssignedIP string
 	DeviceId   string
 }
+
+type AuxRemoveArgs struct {
+	IdPrefix string
+}
+
+type AuxRemoveReply struct {
+	Error   error
+	Message string
+}
+
+type AuxDeviceDTO struct {
+	Id          string
+	Type        string
+	GatewayNode string
+	PublicKey   string
+	AssignedIP  string
+}
+
+type AuxListArgs struct{}
+
+type AuxListReply struct {
+	Devices []AuxDeviceDTO
+	Error   string
+}

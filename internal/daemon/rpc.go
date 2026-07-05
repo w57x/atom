@@ -115,6 +115,71 @@ PersistentKeepalive = 25`,
 	return nil
 }
 
+func (l *LocalAPI) ListAuxiliaryDevices(args *api.AuxListArgs, reply *api.AuxListReply) error {
+	var devices []api.AuxDeviceDTO
+	for _, aux := range l.meshFSM.State.AuxDevices {
+		devices = append(devices, api.AuxDeviceDTO{
+			Id:          aux.Id,
+			Type:        aux.Type,
+			GatewayNode: aux.GatewayNode,
+			PublicKey:   aux.PublicKey,
+			AssignedIP:  aux.AssignedIP,
+		})
+	}
+
+	sort.Slice(devices, func(i, j int) bool {
+		return devices[i].Id < devices[j].Id
+	})
+
+	reply.Devices = devices
+	return nil
+}
+
+func (l *LocalAPI) RemoveAuxiliaryDevice(args *api.AuxRemoveArgs, reply *api.AuxRemoveReply) error {
+	if l.raftNode.State() != raft.Leader {
+		return l.forwardToLeader("Atom.RemoveAuxiliaryDevice", args, reply)
+	}
+
+	var match string
+	var matchCount int
+
+	for id := range l.meshFSM.State.AuxDevices {
+		if len(id) >= len(args.IdPrefix) && id[:len(args.IdPrefix)] == args.IdPrefix {
+			match = id
+			matchCount++
+		}
+	}
+
+	if matchCount == 0 {
+		reply.Error = fmt.Errorf("no auxiliary device found matching prefix '%s'", args.IdPrefix)
+		return nil
+	}
+	if matchCount > 1 {
+		reply.Error = fmt.Errorf("ambiguous prefix '%s' matches %d auxiliary devices", args.IdPrefix, matchCount)
+		return nil
+	}
+
+	cmd := network.Command{
+		Opcode:  network.CmdRemoveAuxDevice,
+		Payload: match,
+	}
+
+	var buf bytes.Buffer
+	enc := gob.NewEncoder(&buf)
+	if err := enc.Encode(cmd); err != nil {
+		return err
+	}
+
+	applyFuture := l.raftNode.Apply(buf.Bytes(), 5*time.Second)
+	if err := applyFuture.Error(); err != nil {
+		reply.Error = err
+	} else {
+		reply.Message = fmt.Sprintf("Removed auxiliary device %s", match)
+	}
+
+	return nil
+}
+
 func (api *LocalAPI) CreateToken(args *api.TokenCreateArgs, reply *api.TokenCreateReply) error {
 	if api.raftNode.State() != raft.Leader {
 		return api.forwardToLeader("Atom.CreateToken", args, reply)

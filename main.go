@@ -248,6 +248,53 @@ func main() {
 							return nil
 						},
 					},
+					{
+						Name:  "list",
+						Usage: "List all auxiliary devices",
+						Flags: []cli.Flag{
+							&cli.StringFlag{
+								Name:      "socket",
+								Usage:     "Path to the daemon unix socket",
+								Aliases:   []string{"s"},
+								TakesFile: true,
+								Value:     "/var/run/atom.sock",
+							},
+							&cli.BoolFlag{
+								Name:    "json",
+								Usage:   "Output as JSON",
+								Aliases: []string{"j"},
+							},
+						},
+						Action: func(ctx context.Context, c *cli.Command) error {
+							commands.ListAuxiliaryDevices(c.String("socket"), c.Bool("json"))
+							return nil
+						},
+					},
+					{
+						Name:  "remove",
+						Usage: "Remove an auxiliary device from the system",
+						Flags: []cli.Flag{
+							&cli.StringFlag{
+								Name:      "socket",
+								Usage:     "Path to the daemon unix socket",
+								Aliases:   []string{"s"},
+								TakesFile: true,
+								Value:     "/var/run/atom.sock",
+							},
+							&cli.BoolFlag{
+								Name:    "json",
+								Usage:   "Output as JSON",
+								Aliases: []string{"j"},
+							},
+						},
+						Action: func(ctx context.Context, c *cli.Command) error {
+							if c.Args().Len() < 1 {
+								return fmt.Errorf("device ID prefix is required")
+							}
+							commands.RemoveAuxiliaryDevice(c.String("socket"), c.Args().First(), c.Bool("json"))
+							return nil
+						},
+					},
 				},
 			},
 			{

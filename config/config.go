@@ -19,6 +19,7 @@ type NodeConfig struct {
 }
 
 type NetworkConfig struct {
+	InterfaceName string `yaml:"interface_name"`
 	WireguardPort int    `yaml:"wireguard_port"`
 	TCPJoinPort   uint16 `yaml:"tcp_join_port"`
 }
@@ -63,6 +64,7 @@ func LoadConfig(filePath string) (*Config, error) {
 			Bootstrap: false,
 		},
 		Network: NetworkConfig{
+			InterfaceName: "wg0",
 			WireguardPort: 51820,
 			TCPJoinPort:   7700,
 		},

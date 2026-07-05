@@ -18,6 +18,9 @@ node:
 
 # Networking
 network_config:
+  # The name of the virtual interface to create for the VPN tunnel.
+  # interface_name: "wg0"
+
   # The UDP port WireGuard will listen on for the encrypted VPN tunnel.
   # wireguard_port: 51820
 

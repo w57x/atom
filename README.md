@@ -168,3 +168,51 @@ will securely transfer leadership to a Follower before shutting down.
 ```bash
 atom daemon stop
 ```
+
+### 6. Auxiliary Devices
+
+You can attach unmanaged "Auxiliary Devices" (like phones or laptops) directly
+to the mesh without running the Atom daemon on them. The mesh handles routing
+via a designated Gateway node and provides split-tunnel DNS resolution natively.
+
+To add an auxiliary device:
+
+```bash
+atom aux add --type phone --from node-2 --pubkey <base64_pubkey>
+```
+
+_This will generate a standard WireGuard `.conf`_
+
+Manage auxiliary devices:
+
+```bash
+atom aux list
+atom aux remove <id_prefix>
+```
+
+#### Troubleshooting Routing and Auxiliary Devices
+
+When using auxiliary devices, the designated Gateway node physically routes
+traffic between the auxiliary device and the rest of the mesh.
+
+**1. Kernel IP Forwarding**
+For the Linux kernel to allow routing traffic between peers, IP forwarding must
+be enabled on the Gateway node:
+
+```bash
+sudo sysctl -w net.ipv4.ip_forward=1
+```
+
+_(To make this permanent, add `net.ipv4.ip_forward = 1` to `/etc/sysctl.conf`)_
+
+**2. UFW Forwarding Policy**
+If you are using `ufw` on the Gateway node, its default `FORWARD` policy is
+`DROP`, which will silently discard TCP traffic (though ICMP pings might still
+work due to global before-rules).
+
+To fix TCP timeouts, explicitly allow UFW to route traffic between WireGuard
+interfaces on the Gateway node:
+
+```bash
+sudo ufw route allow in on wg0 out on wg0
+```
