@@ -62,6 +62,7 @@ func Start(cfg config.Config) error {
 	}
 	defer wgClient.Close()
 
+	fsmStatePath := filepath.Join(cfg.Consensus.DataDir, "fsm_state.json")
 	meshFSM := &fsm.MeshFSM{
 		State: &fsm.MeshState{
 			Nodes:      make(map[string]fsm.Node),
@@ -70,6 +71,11 @@ func Start(cfg config.Config) error {
 		},
 		WGClient:      wgClient,
 		InterfaceName: cfg.Network.InterfaceName,
+		StatePath:     fsmStatePath,
+	}
+
+	if err := meshFSM.LoadState(); err != nil {
+		slog.Warn("Failed to load fsm_state.json", "err", err)
 	}
 
 	var localIP netip.Addr
@@ -133,6 +139,14 @@ func Start(cfg config.Config) error {
 	})
 	if err != nil {
 		return fmt.Errorf("failed to configure wireguard device: %w", err)
+	}
+
+	if len(meshFSM.State.Nodes) > 0 || len(meshFSM.State.AuxDevices) > 0 {
+		if err := meshFSM.SyncWireguard(); err != nil {
+			slog.Warn("Failed to sync wireguard from restored state", "err", err)
+		} else {
+			slog.Info("Restored WireGuard peers and routes from disk state")
+		}
 	}
 
 	if !cfg.Node.Bootstrap && joinAccept != nil {

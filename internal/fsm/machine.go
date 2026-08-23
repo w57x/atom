@@ -10,7 +10,9 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"os"
 	"strings"
+	"time"
 
 	"github.com/hashicorp/raft"
 	"github.com/vishvananda/netlink"
@@ -77,6 +79,38 @@ type MeshFSM struct {
 	State         *MeshState
 	WGClient      *wgctrl.Client
 	InterfaceName string
+	StatePath     string
+}
+
+func (f *MeshFSM) PersistState() {
+	if f.StatePath == "" {
+		return
+	}
+	b, err := json.Marshal(f.State)
+	if err != nil {
+		slog.Error("failed to marshal mesh state", "err", err)
+		return
+	}
+	if err := os.WriteFile(f.StatePath, b, 0600); err != nil {
+		slog.Error("failed to persist mesh state to disk", "path", f.StatePath, "err", err)
+	}
+}
+
+func (f *MeshFSM) LoadState() error {
+	if f.StatePath == "" {
+		return nil
+	}
+	b, err := os.ReadFile(f.StatePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if err := json.Unmarshal(b, &f.State); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (f *MeshFSM) Apply(log *raft.Log) any {
@@ -305,8 +339,17 @@ func (f *MeshFSM) Apply(log *raft.Log) any {
 				netlink.RouteReplace(route)
 			}
 		}
+	case network.CmdRemoveAuxDevice:
+		if deviceID, ok := cmd.Payload.(string); ok {
+			if _, exists := f.State.AuxDevices[deviceID]; exists {
+				slog.Info(fmt.Sprintf("Removing aux device %s from mesh", deviceID))
+				delete(f.State.AuxDevices, deviceID)
+				_ = f.SyncWireguard()
+			}
+		}
 	}
 
+	f.PersistState()
 	return nil
 }
 
@@ -322,7 +365,11 @@ func (f *MeshFSM) Restore(rc io.ReadCloser) error {
 	if err := json.NewDecoder(rc).Decode(&f.State); err != nil {
 		return err
 	}
+	f.PersistState()
+	return f.SyncWireguard()
+}
 
+func (f *MeshFSM) SyncWireguard() error {
 	dev, err := f.WGClient.Device(f.InterfaceName)
 	if err != nil {
 		return err
@@ -336,32 +383,44 @@ func (f *MeshFSM) Restore(rc io.ReadCloser) error {
 		}
 	}
 
+	keepalive := 25 * time.Second
 	var peers []wgtypes.PeerConfig
 	for _, node := range f.State.Nodes {
 		if node.PubKey == dev.PublicKey.String() {
 			continue
 		}
 
-		pubKey, _ := wgtypes.ParseKey(node.PubKey)
-		_, ipNet, _ := net.ParseCIDR(node.VPNIP + "/32")
+		pubKey, err := wgtypes.ParseKey(node.PubKey)
+		if err != nil {
+			continue
+		}
+		_, ipNet, err := net.ParseCIDR(node.VPNIP + "/32")
+		if err != nil {
+			continue
+		}
 		allowedIPs := []net.IPNet{*ipNet}
 
 		for _, aux := range f.State.AuxDevices {
 			if aux.GatewayNode == node.Name {
-				_, auxIpNet, _ := net.ParseCIDR(aux.AssignedIP + "/32")
-				allowedIPs = append(allowedIPs, *auxIpNet)
+				_, auxIpNet, err := net.ParseCIDR(aux.AssignedIP + "/32")
+				if err == nil {
+					allowedIPs = append(allowedIPs, *auxIpNet)
+				}
 			}
 		}
 
 		peerCfg := wgtypes.PeerConfig{
-			PublicKey:         pubKey,
-			ReplaceAllowedIPs: true,
-			AllowedIPs:        allowedIPs,
+			PublicKey:                   pubKey,
+			ReplaceAllowedIPs:           true,
+			AllowedIPs:                  allowedIPs,
+			PersistentKeepaliveInterval: &keepalive,
 		}
 
 		if node.PublicEndpoint != "" {
-			endpoint, _ := net.ResolveUDPAddr("udp", node.PublicEndpoint)
-			peerCfg.Endpoint = endpoint
+			endpoint, err := net.ResolveUDPAddr("udp", node.PublicEndpoint)
+			if err == nil {
+				peerCfg.Endpoint = endpoint
+			}
 		}
 
 		peers = append(peers, peerCfg)
@@ -378,16 +437,22 @@ func (f *MeshFSM) Restore(rc io.ReadCloser) error {
 
 	// Now we also add peers for AuxDevices where we are the GatewayNode
 	for _, aux := range f.State.AuxDevices {
-		_, auxIpNet, _ := net.ParseCIDR(aux.AssignedIP + "/32")
+		_, auxIpNet, err := net.ParseCIDR(aux.AssignedIP + "/32")
+		if err != nil {
+			continue
+		}
 
 		if aux.GatewayNode == ourNodeName {
-			pubKey, _ := wgtypes.ParseKey(aux.PublicKey)
-			peerCfg := wgtypes.PeerConfig{
-				PublicKey:         pubKey,
-				ReplaceAllowedIPs: true,
-				AllowedIPs:        []net.IPNet{*auxIpNet},
+			pubKey, err := wgtypes.ParseKey(aux.PublicKey)
+			if err == nil {
+				peerCfg := wgtypes.PeerConfig{
+					PublicKey:                   pubKey,
+					ReplaceAllowedIPs:           true,
+					AllowedIPs:                  []net.IPNet{*auxIpNet},
+					PersistentKeepaliveInterval: &keepalive,
+				}
+				peers = append(peers, peerCfg)
 			}
-			peers = append(peers, peerCfg)
 		}
 
 		link, err := netlink.LinkByName(f.InterfaceName)
