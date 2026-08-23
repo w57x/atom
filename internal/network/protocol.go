@@ -34,6 +34,7 @@ type JoinRequestPayload struct {
 	WGPort          int
 	RaftPort        uint16
 	InternalRPCPort uint16
+	PublicIP        string
 }
 
 type JoinAcceptPayload struct {

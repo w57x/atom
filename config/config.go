@@ -22,6 +22,7 @@ type NetworkConfig struct {
 	InterfaceName string `yaml:"interface_name"`
 	WireguardPort int    `yaml:"wireguard_port"`
 	TCPJoinPort   uint16 `yaml:"tcp_join_port"`
+	PublicIP      string `yaml:"public_ip"`
 }
 
 type ConsensusConfig struct {

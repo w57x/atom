@@ -213,6 +213,11 @@ func Start(cfg config.Config) error {
 				time.Sleep(1 * time.Second)
 			}
 
+			var publicEndpoint string
+			if cfg.Network.PublicIP != "" {
+				publicEndpoint = fmt.Sprintf("%s:%d", cfg.Network.PublicIP, cfg.Network.WireguardPort)
+			}
+
 			// Broadcast ourselves to the entire mesh through the Raft log
 			// so followers actually receive our node information!
 			cmd := network.Command{
@@ -221,7 +226,7 @@ func Start(cfg config.Config) error {
 					Name:            cfg.Node.Name,
 					VPNIP:           localIP.String(),
 					PubKey:          pubKey,
-					PublicEndpoint:  "",
+					PublicEndpoint:  publicEndpoint,
 					RaftPort:        cfg.Consensus.RaftPort,
 					InternalRPCPort: cfg.Api.InternalRPCPort,
 				},
@@ -420,6 +425,7 @@ func joinMeshCluster(cfg config.Config, pubKey string) (*network.JoinAcceptPaylo
 			WGPort:          cfg.Network.WireguardPort,
 			RaftPort:        cfg.Consensus.RaftPort,
 			InternalRPCPort: cfg.Api.InternalRPCPort,
+			PublicIP:        cfg.Network.PublicIP,
 		},
 	})
 
@@ -485,7 +491,10 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 	}
 
 	req := joinMsg.Payload.(network.JoinRequestPayload)
-	clientIP := conn.RemoteAddr().(*net.TCPAddr).IP.String()
+	clientIP := req.PublicIP
+	if clientIP == "" {
+		clientIP = conn.RemoteAddr().(*net.TCPAddr).IP.String()
+	}
 
 	newIP, err := GetNextValidIP(*d.fsm, d.cfg)
 	if err != nil {

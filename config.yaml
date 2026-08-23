@@ -24,6 +24,10 @@ network_config:
   # The UDP port WireGuard will listen on for the encrypted VPN tunnel.
   # wireguard_port: 51820
 
+  # The public internet IP of this node (recommended for the bootstrapper, optional for followers).
+  # If omitted on followers, it will be automatically detected by the join server.
+  # public_ip: "1.2.3.4"
+
   # The TCP port used to securely accept incoming join requests from new nodes.
   # tcp_join_port: 7700
 

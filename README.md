@@ -85,8 +85,9 @@ node:
 security:
   private_key_path: "/etc/atom/private.key"
 
-network:
+network_config:
   wireguard_port: 51820
+  public_ip: "192.168.1.100"
   tcp_join_port: 8080
 
 consensus:
