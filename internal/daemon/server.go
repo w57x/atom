@@ -78,6 +78,9 @@ func Start(cfg config.Config) error {
 		slog.Warn("Failed to load fsm_state.json", "err", err)
 	}
 
+	// Replay existing logs from raft.db if fsm_state.json was missing on disk
+	replayRaftLogsIfStateEmpty(cfg.Consensus.DataDir, meshFSM)
+
 	var localIP netip.Addr
 
 	privKey, err := loadOrGeneratePrivateKey(cfg.Security.PrivateKeyPath)
@@ -622,6 +625,41 @@ func GetNextValidIP(fsm fsm.MeshFSM, cfg config.Config) (netip.Addr, error) {
 
 		if !prefix.Contains(candidateIP) {
 			return netip.Addr{}, fmt.Errorf("IP pool exhausted")
+		}
+	}
+}
+
+func replayRaftLogsIfStateEmpty(dataDir string, meshFSM *fsm.MeshFSM) {
+	if len(meshFSM.State.Nodes) > 0 {
+		return
+	}
+
+	dbPath := filepath.Join(dataDir, "raft.db")
+	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+		return
+	}
+
+	store, err := raftboltdb.NewBoltStore(dbPath)
+	if err != nil {
+		return
+	}
+	defer store.Close()
+
+	first, err := store.FirstIndex()
+	if err != nil || first == 0 {
+		return
+	}
+	last, err := store.LastIndex()
+	if err != nil || last == 0 {
+		return
+	}
+
+	for i := first; i <= last; i++ {
+		var raftLog raft.Log
+		if err := store.GetLog(i, &raftLog); err == nil {
+			if raftLog.Type == raft.LogCommand {
+				meshFSM.Apply(&raftLog)
+			}
 		}
 	}
 }
