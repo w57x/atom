@@ -21,7 +21,7 @@ func GenerateUUID() string {
 }
 
 func GenerateID() string {
-	b := make([]byte, 6)
+	b := make([]byte, 16)
 
 	if _, err := rand.Read(b); err != nil {
 		panic("failed to read random bytes for token ID: " + err.Error())

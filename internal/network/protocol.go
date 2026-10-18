@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"time"
 
 	"atom/internal/utils"
 )
 
 const Magic = "ATOMESH.1"
+const MaxPayloadSize = 64 * 1024
 
 const (
 	OpHello           byte = 0x00
@@ -60,6 +62,8 @@ func (w *Wire) SetSecret(secret string) {
 }
 
 func (w *Wire) Write(msg Message) error {
+	_ = w.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+
 	var buf bytes.Buffer
 	if err := gob.NewEncoder(&buf).Encode(msg); err != nil {
 		return fmt.Errorf("failed to encode message: %w", err)
@@ -73,6 +77,10 @@ func (w *Wire) Write(msg Message) error {
 		if err != nil {
 			return fmt.Errorf("encryption failed: %w", err)
 		}
+	}
+
+	if len(payload) > MaxPayloadSize {
+		return fmt.Errorf("payload exceeds maximum allowed size")
 	}
 
 	if _, err := w.conn.Write([]byte(Magic)); err != nil {
@@ -95,6 +103,8 @@ func (w *Wire) Write(msg Message) error {
 func (w *Wire) Read() (Message, error) {
 	var msg Message
 
+	_ = w.conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+
 	magicBuf := make([]byte, len(Magic))
 	if _, err := io.ReadFull(w.conn, magicBuf); err != nil {
 		return msg, fmt.Errorf("failed to read magic: %w", err)
@@ -110,8 +120,8 @@ func (w *Wire) Read() (Message, error) {
 	}
 	length := binary.BigEndian.Uint32(lenBuf)
 
-	if length > 1024*1024*10 {
-		return msg, fmt.Errorf("payload too large")
+	if length > MaxPayloadSize {
+		return msg, fmt.Errorf("payload too large: %d bytes (max: %d)", length, MaxPayloadSize)
 	}
 
 	payload := make([]byte, length)

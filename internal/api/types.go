@@ -27,6 +27,7 @@ type DaemonStopReply struct {
 
 type NodeDestroyArgs struct {
 	NodeName string
+	LeaderID string
 }
 
 type NodeDestroyReply struct {

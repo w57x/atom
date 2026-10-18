@@ -109,6 +109,17 @@ func main() {
 						joinToken = jt
 					}
 
+					for name, val := range map[string]string{
+						"user":        user,
+						"group":       group,
+						"working-dir": workingDir,
+						"join-token":  joinToken,
+					} {
+						if strings.ContainsAny(val, "\r\n") {
+							return fmt.Errorf("invalid character in %s: newlines are not permitted", name)
+						}
+					}
+
 					finalSystem :=
 						strings.ReplaceAll(
 							strings.ReplaceAll(
@@ -118,13 +129,15 @@ func main() {
 							), "{wd}", workingDir,
 						)
 
+					fileMode := os.FileMode(0644)
 					if len(joinToken) > 0 {
 						finalSystem = strings.ReplaceAll(finalSystem, "{jointoken}", fmt.Sprintf(`Environment="ATOM_JOIN_TOKEN=%s"`, joinToken))
+						fileMode = 0600
 					} else {
 						finalSystem = strings.ReplaceAll(finalSystem, "{jointoken}", "")
 					}
 
-					if err := os.WriteFile(outputPath, []byte(finalSystem), 0644); err != nil {
+					if err := os.WriteFile(outputPath, []byte(finalSystem), fileMode); err != nil {
 						return fmt.Errorf("failed to write systemd file: %w", err)
 					}
 					fmt.Printf("Successfully generated service file at %s\n", outputPath)

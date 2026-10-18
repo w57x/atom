@@ -12,6 +12,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/hashicorp/raft"
@@ -76,10 +77,118 @@ type MeshState struct {
 }
 
 type MeshFSM struct {
+	Mu            sync.RWMutex
 	State         *MeshState
 	WGClient      *wgctrl.Client
 	InterfaceName string
 	StatePath     string
+}
+
+func (f *MeshFSM) GetNode(name string) (Node, bool) {
+	f.Mu.RLock()
+	defer f.Mu.RUnlock()
+	node, ok := f.State.Nodes[name]
+	return node, ok
+}
+
+func (f *MeshFSM) GetAllNodes() []Node {
+	f.Mu.RLock()
+	defer f.Mu.RUnlock()
+	nodes := make([]Node, 0, len(f.State.Nodes))
+	for _, n := range f.State.Nodes {
+		nodes = append(nodes, n)
+	}
+	return nodes
+}
+
+func (f *MeshFSM) NodeCount() int {
+	f.Mu.RLock()
+	defer f.Mu.RUnlock()
+	return len(f.State.Nodes)
+}
+
+func (f *MeshFSM) HasNode(name string) bool {
+	f.Mu.RLock()
+	defer f.Mu.RUnlock()
+	_, ok := f.State.Nodes[name]
+	return ok
+}
+
+func (f *MeshFSM) HasPublicKey(pubKey string) bool {
+	f.Mu.RLock()
+	defer f.Mu.RUnlock()
+	for _, n := range f.State.Nodes {
+		if n.PubKey == pubKey {
+			return true
+		}
+	}
+	for _, a := range f.State.AuxDevices {
+		if a.PublicKey == pubKey {
+			return true
+		}
+	}
+	return false
+}
+
+func (f *MeshFSM) GetToken(id string) (Token, bool) {
+	f.Mu.RLock()
+	defer f.Mu.RUnlock()
+	tok, ok := f.State.Tokens[id]
+	return tok, ok
+}
+
+func (f *MeshFSM) GetAuxDevice(id string) (AuxDevice, bool) {
+	f.Mu.RLock()
+	defer f.Mu.RUnlock()
+	aux, ok := f.State.AuxDevices[id]
+	return aux, ok
+}
+
+func (f *MeshFSM) GetAllAuxDevices() []AuxDevice {
+	f.Mu.RLock()
+	defer f.Mu.RUnlock()
+	devices := make([]AuxDevice, 0, len(f.State.AuxDevices))
+	for _, a := range f.State.AuxDevices {
+		devices = append(devices, a)
+	}
+	return devices
+}
+
+func (f *MeshFSM) MatchAuxDeviceByPrefix(prefix string) (AuxDevice, int) {
+	f.Mu.RLock()
+	defer f.Mu.RUnlock()
+	if prefix == "" {
+		return AuxDevice{}, 0
+	}
+	var match AuxDevice
+	var count int
+	for id, aux := range f.State.AuxDevices {
+		if strings.HasPrefix(id, prefix) {
+			match = aux
+			count++
+		}
+	}
+	return match, count
+}
+
+func (f *MeshFSM) LookupInternalDNS(name string) (string, bool) {
+	f.Mu.RLock()
+	defer f.Mu.RUnlock()
+	if node, ok := f.State.Nodes[name]; ok {
+		return node.VPNIP, true
+	}
+	for _, aux := range f.State.AuxDevices {
+		if aux.Id == name {
+			return aux.AssignedIP, true
+		}
+	}
+	return "", false
+}
+
+func (f *MeshFSM) GetNetworkCIDR() string {
+	f.Mu.RLock()
+	defer f.Mu.RUnlock()
+	return f.State.NetworkCIDR
 }
 
 func (f *MeshFSM) PersistState() {
@@ -97,6 +206,8 @@ func (f *MeshFSM) PersistState() {
 }
 
 func (f *MeshFSM) LoadState() error {
+	f.Mu.Lock()
+	defer f.Mu.Unlock()
 	if f.StatePath == "" {
 		return nil
 	}
@@ -114,6 +225,9 @@ func (f *MeshFSM) LoadState() error {
 }
 
 func (f *MeshFSM) Apply(log *raft.Log) any {
+	f.Mu.Lock()
+	defer f.Mu.Unlock()
+
 	var cmd network.Command
 
 	buf := bytes.NewReader(log.Data)
@@ -132,6 +246,11 @@ func (f *MeshFSM) Apply(log *raft.Log) any {
 		}
 	case network.CmdAddNode:
 		if node, ok := cmd.Payload.(Node); ok {
+			if existing, exists := f.State.Nodes[node.Name]; exists && existing.PubKey != node.PubKey {
+				slog.Error("Refusing to overwrite existing node with different pubkey", "name", node.Name)
+				return fmt.Errorf("node %s already exists with different key", node.Name)
+			}
+
 			slog.Info(fmt.Sprintf("New joined node %s", node.Name))
 			f.State.Nodes[node.Name] = node
 
@@ -344,7 +463,7 @@ func (f *MeshFSM) Apply(log *raft.Log) any {
 			if _, exists := f.State.AuxDevices[deviceID]; exists {
 				slog.Info(fmt.Sprintf("Removing aux device %s from mesh", deviceID))
 				delete(f.State.AuxDevices, deviceID)
-				_ = f.SyncWireguard()
+				_ = f.syncWireguardLocked()
 			}
 		}
 	}
@@ -354,6 +473,8 @@ func (f *MeshFSM) Apply(log *raft.Log) any {
 }
 
 func (f *MeshFSM) Snapshot() (raft.FSMSnapshot, error) {
+	f.Mu.RLock()
+	defer f.Mu.RUnlock()
 	b, err := json.Marshal(f.State)
 	if err != nil {
 		return nil, err
@@ -362,14 +483,22 @@ func (f *MeshFSM) Snapshot() (raft.FSMSnapshot, error) {
 }
 
 func (f *MeshFSM) Restore(rc io.ReadCloser) error {
+	f.Mu.Lock()
+	defer f.Mu.Unlock()
 	if err := json.NewDecoder(rc).Decode(&f.State); err != nil {
 		return err
 	}
 	f.PersistState()
-	return f.SyncWireguard()
+	return f.syncWireguardLocked()
 }
 
 func (f *MeshFSM) SyncWireguard() error {
+	f.Mu.RLock()
+	defer f.Mu.RUnlock()
+	return f.syncWireguardLocked()
+}
+
+func (f *MeshFSM) syncWireguardLocked() error {
 	dev, err := f.WGClient.Device(f.InterfaceName)
 	if err != nil {
 		return err

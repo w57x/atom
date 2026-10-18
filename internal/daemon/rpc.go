@@ -15,6 +15,7 @@ import (
 	"os"
 	"sort"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/hashicorp/raft"
@@ -32,7 +33,7 @@ func (api *LocalAPI) forwardToLeader(method string, args any, reply any) error {
 		return fmt.Errorf("no leader elected")
 	}
 
-	leaderNode, ok := api.meshFSM.State.Nodes[string(leaderID)]
+	leaderNode, ok := api.meshFSM.GetNode(string(leaderID))
 	if !ok {
 		return fmt.Errorf("leader node not found in state")
 	}
@@ -53,8 +54,8 @@ func (l *LocalAPI) AddAuxiliaryDevice(args *api.AuxAddArgs, reply *api.AuxAddRep
 		return l.forwardToLeader("Atom.AddAuxiliaryDevice", args, reply)
 	}
 
-	if node, exists := l.meshFSM.State.Nodes[args.Info.GatewayNode]; exists {
-		newIp, err := GetNextValidIP(*l.meshFSM, l.config)
+	if node, exists := l.meshFSM.GetNode(args.Info.GatewayNode); exists {
+		newIp, err := GetNextValidIP(l.meshFSM, l.config)
 		if err != nil {
 			slog.Error("failed to get valid IP", "err", err)
 			reply.Error = fmt.Errorf("unable to add the device :: Cause(IpAttributionFailure)")
@@ -106,7 +107,7 @@ PersistentKeepalive = 25`,
 				node.VPNIP,
 				node.PubKey,
 				endpointLine,
-				l.meshFSM.State.NetworkCIDR)
+				l.meshFSM.GetNetworkCIDR())
 		}
 	} else {
 		reply.Error = fmt.Errorf("no node named `%s` found", args.Info.GatewayNode)
@@ -117,7 +118,7 @@ PersistentKeepalive = 25`,
 
 func (l *LocalAPI) ListAuxiliaryDevices(args *api.AuxListArgs, reply *api.AuxListReply) error {
 	var devices []api.AuxDeviceDTO
-	for _, aux := range l.meshFSM.State.AuxDevices {
+	for _, aux := range l.meshFSM.GetAllAuxDevices() {
 		devices = append(devices, api.AuxDeviceDTO{
 			Id:          aux.Id,
 			Type:        aux.Type,
@@ -140,15 +141,12 @@ func (l *LocalAPI) RemoveAuxiliaryDevice(args *api.AuxRemoveArgs, reply *api.Aux
 		return l.forwardToLeader("Atom.RemoveAuxiliaryDevice", args, reply)
 	}
 
-	var match string
-	var matchCount int
-
-	for id := range l.meshFSM.State.AuxDevices {
-		if len(id) >= len(args.IdPrefix) && id[:len(args.IdPrefix)] == args.IdPrefix {
-			match = id
-			matchCount++
-		}
+	if args.IdPrefix == "" {
+		reply.Error = fmt.Errorf("device ID prefix cannot be empty")
+		return nil
 	}
+
+	match, matchCount := l.meshFSM.MatchAuxDeviceByPrefix(args.IdPrefix)
 
 	if matchCount == 0 {
 		reply.Error = fmt.Errorf("no auxiliary device found matching prefix '%s'", args.IdPrefix)
@@ -161,7 +159,7 @@ func (l *LocalAPI) RemoveAuxiliaryDevice(args *api.AuxRemoveArgs, reply *api.Aux
 
 	cmd := network.Command{
 		Opcode:  network.CmdRemoveAuxDevice,
-		Payload: match,
+		Payload: match.Id,
 	}
 
 	var buf bytes.Buffer
@@ -174,7 +172,7 @@ func (l *LocalAPI) RemoveAuxiliaryDevice(args *api.AuxRemoveArgs, reply *api.Aux
 	if err := applyFuture.Error(); err != nil {
 		reply.Error = err
 	} else {
-		reply.Message = fmt.Sprintf("Removed auxiliary device %s", match)
+		reply.Message = fmt.Sprintf("Removed auxiliary device %s", match.Id)
 	}
 
 	return nil
@@ -254,6 +252,20 @@ func (api *LocalAPI) DestroyNode(args *api.NodeDestroyArgs, reply *api.NodeDestr
 		return nil
 	}
 
+	// Validate authorization: must be called with the valid Raft leader ID if other nodes exist
+	_, leaderID := api.raftNode.LeaderWithID()
+	if args.LeaderID != "" {
+		if string(leaderID) == "" || args.LeaderID != string(leaderID) {
+			slog.Warn("Unauthorized destroy request: invalid or mismatched leader ID", "expected", leaderID, "got", args.LeaderID)
+			reply.Error = "unauthorized: invalid leader credentials"
+			return nil
+		}
+	} else if api.meshFSM.NodeCount() > 1 {
+		slog.Warn("Unauthorized destroy request: missing leader credentials")
+		reply.Error = "unauthorized: missing leader credentials"
+		return nil
+	}
+
 	p, err := os.FindProcess(os.Getpid())
 	if err == nil {
 		os.RemoveAll(api.config.Consensus.DataDir)
@@ -268,7 +280,7 @@ func (l *LocalAPI) RemoveNode(args *api.NodeRemoveArgs, reply *api.NodeRemoveRep
 	if l.config.Node.Name == args.NodeName {
 		// NOTE: If the leader is asked to remove itself, it must step down and let another node handle it.
 		// Otherwise, it will destroy itself before it finishes replicating the FSM cleanup command
-		if len(l.meshFSM.State.Nodes) > 1 {
+		if l.meshFSM.NodeCount() > 1 {
 			l.raftNode.LeadershipTransfer()
 			time.Sleep(1 * time.Second)
 			return l.forwardToLeader("Atom.RemoveNode", args, reply)
@@ -291,7 +303,8 @@ func (l *LocalAPI) RemoveNode(args *api.NodeRemoveArgs, reply *api.NodeRemoveRep
 	}
 
 	// Fetch the node to get its VPN IP
-	node, exists := l.meshFSM.State.Nodes[args.NodeName]
+	_, leaderID := l.raftNode.LeaderWithID()
+	node, exists := l.meshFSM.GetNode(args.NodeName)
 	if exists {
 		// Send a DaemonStop RPC to the target node over the VPN
 		// so it gracefully shuts down and doesn't get stuck in an election loop.
@@ -300,7 +313,7 @@ func (l *LocalAPI) RemoveNode(args *api.NodeRemoveArgs, reply *api.NodeRemoveRep
 		if err == nil {
 			var stopReply api.NodeDestroyReply
 			// We don't care if this returns an error
-			_ = client.Call("Atom.DestroyNode", &api.NodeDestroyArgs{NodeName: node.Name}, &stopReply)
+			_ = client.Call("Atom.DestroyNode", &api.NodeDestroyArgs{NodeName: node.Name, LeaderID: string(leaderID)}, &stopReply)
 			client.Close()
 		}
 	}
@@ -335,7 +348,7 @@ func (l *LocalAPI) ListNodes(args *api.NodeListArgs, reply *api.NodeListReply) e
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 
-	for _, node := range l.meshFSM.State.Nodes {
+	for _, node := range l.meshFSM.GetAllNodes() {
 		wg.Add(1)
 		go func(n fsm.Node) {
 			defer wg.Done()
@@ -391,6 +404,48 @@ func StartInternalRPC(bindIP string, localAPI *LocalAPI) error {
 		if err != nil {
 			continue
 		}
+
+		tcpAddr, ok := conn.RemoteAddr().(*net.TCPAddr)
+		if !ok {
+			conn.Close()
+			continue
+		}
+
+		remoteIP := tcpAddr.IP.String()
+
+		// Verify remote caller: aux devices are never allowed to call internal mesh RPC
+		isAux := false
+		for _, aux := range localAPI.meshFSM.GetAllAuxDevices() {
+			if aux.AssignedIP == remoteIP {
+				isAux = true
+				break
+			}
+		}
+		if isAux {
+			slog.Warn("Rejecting internal RPC connection from auxiliary device", "remote_ip", remoteIP)
+			conn.Close()
+			continue
+		}
+
+		// Verify that caller is a registered core mesh node or self
+		isKnownNode := false
+		if remoteIP == bindIP {
+			isKnownNode = true
+		} else {
+			for _, node := range localAPI.meshFSM.GetAllNodes() {
+				if node.VPNIP == remoteIP {
+					isKnownNode = true
+					break
+				}
+			}
+		}
+
+		if !isKnownNode {
+			slog.Warn("Rejecting internal RPC connection from unregistered IP", "remote_ip", remoteIP)
+			conn.Close()
+			continue
+		}
+
 		go server.ServeConn(conn)
 	}
 }
@@ -398,13 +453,11 @@ func StartInternalRPC(bindIP string, localAPI *LocalAPI) error {
 func StartUnixRPC(socketPath string, localAPI *LocalAPI) error {
 	os.Remove(socketPath)
 
+	oldUmask := syscall.Umask(0077)
 	listener, err := net.Listen("unix", socketPath)
+	syscall.Umask(oldUmask)
 	if err != nil {
 		return fmt.Errorf("Unable to listen to the socket %s: %w", socketPath, err)
-	}
-
-	if err := os.Chmod(socketPath, 0600); err != nil {
-		return fmt.Errorf("Unable to make the socket secure: %w", err)
 	}
 
 	server := rpc.NewServer()

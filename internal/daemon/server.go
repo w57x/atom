@@ -144,7 +144,7 @@ func Start(cfg config.Config) error {
 		return fmt.Errorf("failed to configure wireguard device: %w", err)
 	}
 
-	if len(meshFSM.State.Nodes) > 0 || len(meshFSM.State.AuxDevices) > 0 {
+	if meshFSM.NodeCount() > 0 || len(meshFSM.GetAllAuxDevices()) > 0 {
 		if err := meshFSM.SyncWireguard(); err != nil {
 			slog.Warn("Failed to sync wireguard from restored state", "err", err)
 		} else {
@@ -455,12 +455,25 @@ func joinMeshCluster(cfg config.Config, pubKey string) (*network.JoinAcceptPaylo
 		return nil, fmt.Errorf("failed to receive JOIN_ACCEPT: %w", err)
 	}
 
-	payload := acceptMsg.Payload.(network.JoinAcceptPayload)
+	payload, ok := acceptMsg.Payload.(network.JoinAcceptPayload)
+	if !ok {
+		return nil, fmt.Errorf("unexpected join accept payload type")
+	}
 	return &payload, nil
 }
 
 func (d *Daemon) handleConnection(conn net.Conn) {
 	defer conn.Close()
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("recovered panic in handleConnection", "panic", r)
+		}
+	}()
+
+	if d.raftNode.State() != raft.Leader {
+		slog.Warn("Rejecting join connection: node is not the Raft leader", "state", d.raftNode.State())
+		return
+	}
 
 	wire := network.NewWire(conn)
 	helloMsg, err := wire.Expect(network.OpHello)
@@ -469,9 +482,13 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		return
 	}
 
-	tokenID := helloMsg.Payload.(string)
+	tokenID, ok := helloMsg.Payload.(string)
+	if !ok {
+		slog.Warn("invalid tokenID payload type")
+		return
+	}
 
-	token, ok := d.fsm.State.Tokens[tokenID]
+	token, ok := d.fsm.GetToken(tokenID)
 	if !ok {
 		return
 	}
@@ -496,7 +513,8 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		return
 	}
 
-	if !bytes.Equal(acceptMsg.Payload.([]byte), challengeData) {
+	challengeResp, ok := acceptMsg.Payload.([]byte)
+	if !ok || !bytes.Equal(challengeResp, challengeData) {
 		slog.Warn("client failed challenge")
 		return
 	}
@@ -507,13 +525,38 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		return
 	}
 
-	req := joinMsg.Payload.(network.JoinRequestPayload)
-	clientIP := req.PublicIP
-	if clientIP == "" {
-		clientIP = conn.RemoteAddr().(*net.TCPAddr).IP.String()
+	req, ok := joinMsg.Payload.(network.JoinRequestPayload)
+	if !ok {
+		slog.Warn("invalid join request payload type")
+		return
 	}
 
-	newIP, err := GetNextValidIP(*d.fsm, d.cfg)
+	if req.Name == "" || d.fsm.HasNode(req.Name) {
+		slog.Warn("Rejecting join: node name is empty or already in use", "name", req.Name)
+		return
+	}
+
+	if req.PubKey == "" || d.fsm.HasPublicKey(req.PubKey) {
+		slog.Warn("Rejecting join: public key is empty or already in use", "pubKey", req.PubKey)
+		return
+	}
+
+	clientIP := ""
+	if req.PublicIP != "" {
+		parsedIP := net.ParseIP(req.PublicIP)
+		if parsedIP != nil && !parsedIP.IsLoopback() && !parsedIP.IsLinkLocalUnicast() && !parsedIP.IsMulticast() {
+			clientIP = req.PublicIP
+		} else {
+			slog.Warn("Ignoring unsafe public_ip in join request", "ip", req.PublicIP)
+		}
+	}
+	if clientIP == "" {
+		if tcpAddr, ok := conn.RemoteAddr().(*net.TCPAddr); ok {
+			clientIP = tcpAddr.IP.String()
+		}
+	}
+
+	newIP, err := GetNextValidIP(d.fsm, d.cfg)
 	if err != nil {
 		slog.Error("failed to get valid IP", "err", err)
 		return
@@ -571,7 +614,11 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 	}
 
 	// C) Send Accept to Client
-	serverNode := d.fsm.State.Nodes[d.cfg.Node.Name]
+	serverNode, ok := d.fsm.GetNode(d.cfg.Node.Name)
+	if !ok {
+		slog.Error("server node not found in state", "node", d.cfg.Node.Name)
+		return
+	}
 
 	wire.Write(network.Message{
 		Opcode: network.OpJoinAccept,
@@ -584,10 +631,13 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 	})
 }
 
-func GetNextValidIP(fsm fsm.MeshFSM, cfg config.Config) (netip.Addr, error) {
+func GetNextValidIP(meshFSM *fsm.MeshFSM, cfg config.Config) (netip.Addr, error) {
+	meshFSM.Mu.RLock()
+	defer meshFSM.Mu.RUnlock()
+
 	var prefixStr string
-	if fsm.State.NetworkCIDR != "" {
-		prefixStr = fsm.State.NetworkCIDR
+	if meshFSM.State.NetworkCIDR != "" {
+		prefixStr = meshFSM.State.NetworkCIDR
 	} else {
 		prefixStr = fmt.Sprintf("%s/%d", cfg.Node.NetworkLayer.IP, cfg.Node.NetworkLayer.CIDR)
 	}
@@ -601,7 +651,7 @@ func GetNextValidIP(fsm fsm.MeshFSM, cfg config.Config) (netip.Addr, error) {
 
 	for {
 		used := false
-		for _, existingNode := range fsm.State.Nodes {
+		for _, existingNode := range meshFSM.State.Nodes {
 			if existingNode.VPNIP == candidateIP.String() {
 				used = true
 				break
@@ -609,7 +659,7 @@ func GetNextValidIP(fsm fsm.MeshFSM, cfg config.Config) (netip.Addr, error) {
 		}
 
 		if !used {
-			for _, existingAuxDevice := range fsm.State.AuxDevices {
+			for _, existingAuxDevice := range meshFSM.State.AuxDevices {
 				if existingAuxDevice.AssignedIP == candidateIP.String() {
 					used = true
 					break
@@ -630,7 +680,7 @@ func GetNextValidIP(fsm fsm.MeshFSM, cfg config.Config) (netip.Addr, error) {
 }
 
 func replayRaftLogsIfStateEmpty(dataDir string, meshFSM *fsm.MeshFSM) {
-	if len(meshFSM.State.Nodes) > 0 {
+	if meshFSM.NodeCount() > 0 {
 		return
 	}
 
